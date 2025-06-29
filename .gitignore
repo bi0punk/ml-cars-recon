@@ -11,6 +11,8 @@ __pycache__/
 
 /script/capturas/
 
+/tfenv
+/tfenv/
 tfenv/
 .Python
 build/
