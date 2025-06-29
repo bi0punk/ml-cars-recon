@@ -7,6 +7,11 @@ __pycache__/
 *.so
 
 # Distribution / packaging
+
+
+/script/capturas/
+
+
 .Python
 build/
 develop-eggs/
@@ -143,9 +148,9 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-/tfvenv/
-tfvenv/
-
+/tfenv/
+tfenv/
+models/
 /data
 /data/
 /models/
