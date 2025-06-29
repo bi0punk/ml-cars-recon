@@ -1,126 +1,160 @@
 #!/usr/bin/env python3
 import cv2
 import os
+import threading
 from datetime import datetime
 import torch
 import numpy as np
+from queue import Queue
 
 # === RUTAS Y CONFIGURACIÓN ===
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_DIR = os.path.join(BASE_DIR, "capturas")
+BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR   = os.path.join(BASE_DIR, "capturas")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Parámetros
-CONF_DET = 0.5            # umbral detección
-MAX_PER_OBJ = 2           # fotos por vehículo
-IOU_THRESHOLD = 0.5       # para asociar detección a objeto
+CONF_DET       = 0.5    # umbral mínima confianza
+MAX_PER_OBJ    = 2      # fotos máximas por objeto
+IOU_THRESHOLD  = 0.5    # para seguimiento
+IP_CAMERA_URL  = "rtsp://admin:123456@192.168.1.125/stream0"
+MARGIN         = 0.1    # pad (10%) alrededor de la caja para no cortar partes del objeto
 
-IP_CAMERA_URL = "rtsp://admin:123456@192.168.1.125/stream0"
-# === CARGAR YOLOv5 ===
+# === CARGAR YOLOv5 con half-precision en GPU si es posible ===
 print("[INFO] Cargando YOLOv5...")
-model_yolo = torch.hub.load('ultralytics/yolov5', 'yolov5s', trust_repo=True)
-model_yolo.classes = [2, 5]                     # 2=car, 5=bus
-class_names = model_yolo.names
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model = torch.hub.load('ultralytics/yolov5', 'yolov5s', trust_repo=True).to(device).eval()
+if device == "cuda":
+    model.half()
+model.conf    = CONF_DET       # umbral
+model.iou     = IOU_THRESHOLD  # sólovisión interna
+model.classes = [2,5]          # coches y buses
+names = model.names
 
-# === Estructuras de rastreo ===
-next_object_id = 0
-tracked = {}  # id -> {'box':(x1,y1,x2,y2), 'count':n, 'class':cls_name}
+# === Frame grabber en background para minimizar lag ===
+class CameraReader(threading.Thread):
+    def __init__(self, src, queue_size=1):
+        super().__init__(daemon=True)
+        self.cap = cv2.VideoCapture(src)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, queue_size)
+        self.queue = Queue(maxsize=queue_size)
+        self.running = True
 
-def iou(boxA, boxB):
-    # calcula Intersection over Union entre dos cajas
-    xA = max(boxA[0], boxB[0])
-    yA = max(boxA[1], boxB[1])
-    xB = min(boxA[2], boxB[2])
-    yB = min(boxA[3], boxB[3])
-    interW = max(0, xB - xA)
-    interH = max(0, yB - yA)
-    inter = interW * interH
-    areaA = (boxA[2] - boxA[0]) * (boxA[3] - boxA[1])
-    areaB = (boxB[2] - boxB[0]) * (boxB[3] - boxB[1])
-    union = areaA + areaB - inter
-    return inter / union if union > 0 else 0
+    def run(self):
+        while self.running:
+            ret, frame = self.cap.read()
+            if not ret:
+                continue
+            if self.queue.full():
+                try: self.queue.get_nowait()
+                except: pass
+            self.queue.put(frame)
 
-# === Conexión a cámara IP ===
-cap = cv2.VideoCapture(IP_CAMERA_URL)
-if not cap.isOpened():
-    print("[ERROR] No se pudo conectar a la cámara IP.")
-    exit(1)
+    def read(self, timeout=1):
+        try:
+            return True, self.queue.get(timeout=timeout)
+        except:
+            return False, None
 
-# Crear ventana y redimensionarla
-cv2.namedWindow("Detección YOLO", cv2.WINDOW_NORMAL)
-cv2.resizeWindow("Detección YOLO", 1280, 720)   # <--- tamaño 1280×720
+    def stop(self):
+        self.running = False
+        self.cap.release()
+
+# lanzar reader
+reader = CameraReader(IP_CAMERA_URL, queue_size=1)
+reader.start()
+
+cv2.namedWindow("Detección", cv2.WINDOW_NORMAL)
+cv2.resizeWindow("Detección", 1280, 720)
 
 print("[INFO] Streaming iniciado. Presiona 'q' para salir.")
 
-# === Bucle principal ===
+tracked     = {}   # id → {box, count, cls}
+next_obj_id = 0
+
+def iou(a, b):
+    xA, yA = max(a[0], b[0]), max(a[1], b[1])
+    xB, yB = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(0, xB - xA) * max(0, yB - yA)
+    union = ((a[2] - a[0]) * (a[3] - a[1]) +
+             (b[2] - b[0]) * (b[3] - b[1]) - inter)
+    return inter / union if union > 0 else 0
+
 while True:
-    ret, frame = cap.read()
-    if not ret:
+    got, frame = reader.read()
+    if not got:
         continue
 
-    results = model_yolo(frame)
-    detections = results.xyxy[0].cpu().numpy()
+    # inference sobre versión reducida para acelerar
+    img = cv2.resize(frame, (640, 640))
+    if device == "cuda":
+        img = img[:, :, ::-1]  # BGR→RGB
+    results = model(img, size=640)
+    dets = results.xyxy[0].cpu().numpy()  # [x1,y1,x2,y2,conf,cls]
 
-    updated_ids = set()
-
-    for x1, y1, x2, y2, conf, cls_id in detections:
+    h, w = frame.shape[:2]
+    seen_ids = set()
+    for x1, y1, x2, y2, conf, cls in dets:
         if conf < CONF_DET:
             continue
+        cls = int(cls)
+        name = names[cls]
+        # reescalar coords a tamaño original
+        scale_x, scale_y = w / 640, h / 640
+        x1o, y1o = int(x1 * scale_x), int(y1 * scale_y)
+        x2o, y2o = int(x2 * scale_x), int(y2 * scale_y)
 
-        cls_id = int(cls_id)
-        cls_name = class_names.get(cls_id, f"class{cls_id}")
-        box = (int(x1), int(y1), int(x2), int(y2))
+        # aplicar margen
+        bw, bh = x2o - x1o, y2o - y1o
+        pad_w, pad_h = int(bw * MARGIN), int(bh * MARGIN)
+        x1i = max(0, x1o - pad_w)
+        y1i = max(0, y1o - pad_h)
+        x2i = min(w,   x2o + pad_w)
+        y2i = min(h,   y2o + pad_h)
+        box = (x1i, y1i, x2i, y2i)
 
-        # Asociar detección a objeto existente o nuevo
+        # seguimiento sencillo
         best_id, best_iou = None, 0
-        for obj_id, data in tracked.items():
-            if data['class'] != cls_name: continue
+        for oid, data in tracked.items():
+            if data['cls'] != name:
+                continue
             i = iou(box, data['box'])
             if i > best_iou:
-                best_iou, best_id = i, obj_id
+                best_iou, best_id = i, oid
 
         if best_iou > IOU_THRESHOLD:
-            obj_id = best_id
+            oid = best_id
         else:
-            obj_id = next_object_id
-            tracked[obj_id] = {'box': box, 'count': 0, 'class': cls_name}
-            next_object_id += 1
+            oid = next_obj_id
+            tracked[oid] = {'box': box, 'count': 0, 'cls': name}
+            next_obj_id += 1
 
-        tracked[obj_id]['box'] = box
-        updated_ids.add(obj_id)
+        tracked[oid]['box'] = box
+        seen_ids.add(oid)
 
-        # Guardar hasta MAX_PER_OBJ fotos por vehículo
-        if tracked[obj_id]['count'] < MAX_PER_OBJ:
-            x1i, y1i, x2i, y2i = box
+        # guardar hasta MAX_PER_OBJ fotos
+        if tracked[oid]['count'] < MAX_PER_OBJ:
             roi = frame[y1i:y2i, x1i:x2i]
             if roi.size == 0:
                 continue
 
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-            cv2.putText(
-                roi, timestamp,
-                (10, roi.shape[0] - 10),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1, cv2.LINE_AA
-            )
+            # nombre con timestamp (solo en archivo)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+            fn = f"{name}_{oid}_{ts}.jpg"
+            cv2.imwrite(os.path.join(OUTPUT_DIR, fn), roi)
+            tracked[oid]['count'] += 1
+            print(f"[GUARDADO] #{oid} ({name}) foto#{tracked[oid]['count']} → {fn}")
 
-            fname = f"{cls_name}_{obj_id}_{timestamp}.jpg"
-            path = os.path.join(OUTPUT_DIR, fname)
-            cv2.imwrite(path, roi)
-            tracked[obj_id]['count'] += 1
-            print(f"[GUARDADO] obj#{obj_id} ({cls_name}) foto #{tracked[obj_id]['count']} → {path}")
+        # dibujar rectángulo con margen
+        cv2.rectangle(frame, (x1i, y1i), (x2i, y2i), (0, 255, 0), 2)
 
-        # Dibujar recuadro y etiqueta
-        color = (0,255,0) if cls_name=="car" else (255,0,0)
-        x1i, y1i, x2i, y2i = box
-        cv2.rectangle(frame, (x1i,y1i), (x2i,y2i), color, 2)
-        label = f"{cls_name} {conf*100:.0f}%"
-        cv2.putText(frame, label, (x1i, y1i-10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+    # limpiar objetos que desaparecieron
+    for oid in list(tracked):
+        if oid not in seen_ids:
+            del tracked[oid]
 
-    cv2.imshow("Detección YOLO", frame)
+    cv2.imshow("Detección", frame)
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
-cap.release()
+reader.stop()
 cv2.destroyAllWindows()
 print("[INFO] Finalizado.")
