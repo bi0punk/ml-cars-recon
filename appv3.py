@@ -21,7 +21,7 @@ while cap.isOpened():
     centro_frame = (ancho // 2, alto // 2)
 
     # Margen de tolerancia (10%)
-    margen_x = int(ancho * 0.1)
+    margen_x = int(ancho * 0.2)
     margen_y = int(alto * 0.2)
 
     zona_central_x = (centro_frame[0] - margen_x, centro_frame[0] + margen_x)
