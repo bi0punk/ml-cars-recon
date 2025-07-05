@@ -1,12 +1,28 @@
-# Ignorar entornos virtuales
-tfenv/
+# Entornos virtuales
 venv/
+env/
+.tfenv/
+tfenv/
 .venv/
-
-# Archivos de Python
 __pycache__/
-*.py[cod]
+*.pyc
 
-# Configuraciones de editor
+# Archivos temporales
+*.log
+*.tmp
+*.bak
+
+# Modelos y pesos
+*.pt
+*.pth
+runs/
+weights/
+
+# Capturas o salidas
+vehiculo_centrado_*.jpg
+
+# Jupyter
+.ipynb_checkpoints/
+
+# VSCode
 .vscode/
-.idea/
