@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YOLO Vehicle Detection - Streaming Web</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(45deg, #2c3e50, #3498db);
+            color: white;
+            padding: 30px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+            animation: pulse 4s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.5; }
+            50% { transform: scale(1.05); opacity: 0.8; }
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+            position: relative;
+            z-index: 1;
+        }
+
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+            position: relative;
+            z-index: 1;
+        }
+
+        .main-content {
+            display: flex;
+            gap: 20px;
+            padding: 30px;
+            min-height: 600px;
+        }
+
+        .video-section {
+            flex: 2;
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .video-section::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #ff6b6b, #4ecdc4, #45b7d1, #96ceb4);
+            animation: gradientMove 3s ease-in-out infinite;
+        }
+
+        @keyframes gradientMove {
+            0%, 100% { transform: translateX(-100%); }
+            50% { transform: translateX(100%); }
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            height: 500px;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #000;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        .video-stream {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 10px;
+        }
+
+        .video-overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 25px;
+            font-size: 14px;
+            backdrop-filter: blur(5px);
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background: #ff4757;
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: blink 1s infinite;
+        }
+
+        .status-indicator.active {
+            background: #2ed573;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .btn:hover::before {
+            left: 100%;
+        }
+
+        .btn-start {
+            background: linear-gradient(45deg, #2ed573, #17c0eb);
+            color: white;
+        }
+
+        .btn-start:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(46, 213, 115, 0.3);
+        }
+
+        .btn-stop {
+            background: linear-gradient(45deg, #ff4757, #ff6b6b);
+            color: white;
+        }
+
+        .btn-stop:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(255, 71, 87, 0.3);
+        }
+
+        .captures-section {
+            flex: 1;
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            position: relative;
+        }
+
+        .captures-section::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #ffa726, #ff7043, #ab47bc, #5c6bc0);
+            animation: gradientMove 3s ease-in-out infinite reverse;
+        }
+
+        .captures-title {
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            color: #2c3e50;
+            text-align: center;
+            font-weight: 700;
+        }
+
+        .captures-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .capture-item {
+            background: white;
+            border-radius: 10px;
+            padding: 15px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .capture-item::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, #4ecdc4, #44a08d);
+        }
+
+        .capture-item:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+        }
+
+        .capture-image {
+            width: 100%;
+            height: 120px;
+            object-fit: cover;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            transition: transform 0.3s ease;
+        }
+
+        .capture-image:hover {
+            transform: scale(1.05);
+        }
+
+        .capture-timestamp {
+            font-size: 12px;
+            color: #7f8c8d;
+            text-align: center;
+            font-weight: 500;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+            font-style: italic;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .stats-bar {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 20px;
+            display: flex;
+            justify-content: space-around;
+            backdrop-filter: blur(10px);
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            color: #7f8c8d;
+            margin-top: 5px;
+        }
+
+        @media (max-width: 768px) {
+            .main-content {
+                flex-direction: column;
+            }
+            
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .video-container {
+                height: 300px;
+            }
+            
+            .captures-grid {
+                flex-direction: row;
+                overflow-x: auto;
+            }
+            
+            .capture-item {
+                min-width: 150px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚗 YOLO Vehicle Detection</h1>
+            <p>Sistema de detección de vehículos en tiempo real</p>
+        </div>
+
+        <div class="main-content">
+            <div class="video-section">
+                <div class="video-container">
+                    <img id="videoStream" class="video-stream" src="" alt="Streaming de video">
+                    <div class="video-overlay">
+                        <span class="status-indicator" id="statusIndicator"></span>
+                        <span id="statusText">Desconectado</span>
+                    </div>
+                </div>
+                
+                <div class="controls">
+                    <button class="btn btn-start" onclick="startStreaming()">
+                        ▶️ Iniciar Streaming
+                    </button>
+                    <button class="btn btn-stop" onclick="stopStreaming()">
+                        ⏹️ Detener Streaming
+                    </button>
+                </div>
+
+                <div class="stats-bar">
+                    <div class="stat-item">
+                        <div class="stat-value" id="captureCount">0</div>
+                        <div class="stat-label">Capturas</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="streamStatus">Inactivo</div>
+                        <div class="stat-label">Estado</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="lastUpdate">--:--</div>
+                        <div class="stat-label">Última actualización</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="captures-section">
+                <h2 class="captures-title">📸 Últimas Capturas</h2>
+                <div id="capturesContainer" class="captures-grid">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>Esperando capturas...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let streamingActive = false;
+        let captureUpdateInterval;
+
+        function startStreaming() {
+            fetch('/start_streaming')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'started' || data.status === 'already running') {
+                        streamingActive = true;
+                        document.getElementById('videoStream').src = '/video_feed?' + new Date().getTime();
+                        document.getElementById('statusIndicator').classList.add('active');
+                        document.getElementById('statusText').textContent = 'Conectado';
+                        document.getElementById('streamStatus').textContent = 'Activo';
+                        
+                        // Iniciar actualización de capturas
+                        startCaptureUpdates();
+                        
+                        console.log('Streaming iniciado');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error al iniciar streaming:', error);
+                    alert('Error al iniciar el streaming');
+                });
+        }
+
+        function stopStreaming() {
+            fetch('/stop_streaming')
+                .then(response => response.json())
+                .then(data => {
+                    streamingActive = false;
+                    document.getElementById('videoStream').src = '';
+                    document.getElementById('statusIndicator').classList.remove('active');
+                    document.getElementById('statusText').textContent = 'Desconectado';
+                    document.getElementById('streamStatus').textContent = 'Inactivo';
+                    
+                    // Detener actualización de capturas
+                    stopCaptureUpdates();
+                    
+                    console.log('Streaming detenido');
+                })
+                .catch(error => {
+                    console.error('Error al detener streaming:', error);
+                });
+        }
+
+        function startCaptureUpdates() {
+            updateCaptures(); // Actualizar inmediatamente
+            captureUpdateInterval = setInterval(updateCaptures, 2000); // Actualizar cada 2 segundos
+        }
+
+        function stopCaptureUpdates() {
+            if (captureUpdateInterval) {
+                clearInterval(captureUpdateInterval);
+                captureUpdateInterval = null;
+            }
+        }
+
+        function updateCaptures() {
+            fetch('/latest_captures')
+                .then(response => response.json())
+                .then(captures => {
+                    const container = document.getElementById('capturesContainer');
+                    
+                    if (captures.length === 0) {
+                        container.innerHTML = `
+                            <div class="loading">
+                                <div class="spinner"></div>
+                                <p>Esperando capturas...</p>
+                            </div>
+                        `;
+                        return;
+                    }
+
+                    // Actualizar contador de capturas
+                    document.getElementById('captureCount').textContent = captures.length;
+                    
+                    // Actualizar hora
+                    const now = new Date();
+                    document.getElementById('lastUpdate').textContent = 
+                        now.toLocaleTimeString('es-CL', { 
+                            hour: '2-digit', 
+                            minute: '2-digit', 
+                            second: '2-digit' 
+                        });
+
+                    // Generar HTML para las capturas
+                    let html = '';
+                    captures.forEach((capture, index) => {
+                        html += `
+                            <div class="capture-item" style="animation-delay: ${index * 0.1}s">
+                                <img src="${capture.path}" alt="Captura de vehículo" class="capture-image" 
+                                     onerror="this.style.display='none'">
+                                <div class="capture-timestamp">
+                                    🕐 ${capture.timestamp}
+                                </div>
+                            </div>
+                        `;
+                    });
+
+                    container.innerHTML = html;
+                })
+                .catch(error => {
+                    console.error('Error al obtener capturas:', error);
+                });
+        }
+
+        // Manejar errores de imagen del stream
+        document.getElementById('videoStream').onerror = function() {
+            if (streamingActive) {
+                console.log('Error en stream, reintentando...');
+                setTimeout(() => {
+                    this.src = '/video_feed?' + new Date().getTime();
+                }, 1000);
+            }
+        };
+
+        // Inicializar la página
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Página cargada - Sistema listo');
+            
+            // Verificar si hay streaming activo al cargar la página
+            fetch('/latest_captures')
+                .then(response => response.json())
+                .then(captures => {
+                    if (captures.length > 0) {
+                        // Hay capturas, probablemente el streaming está activo
+                        updateCaptures();
+                    }
+                })
+                .catch(error => {
+                    console.log('No hay streaming activo al cargar');
+                });
+        });
+
+        // Actualizar capturas cada 3 segundos si el streaming está activo
+        setInterval(() => {
+            if (streamingActive) {
+                updateCaptures();
+            }
+        }, 3000);
+    </script>
+</body>
+</html>
