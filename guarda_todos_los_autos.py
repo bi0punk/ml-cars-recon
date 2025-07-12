@@ -185,7 +185,8 @@ class OptimizedYOLOStreaming:
         if auto_recortado.size > 0:
             ahora_chile = datetime.now(ZoneInfo("America/Santiago"))
             hora_str = ahora_chile.strftime("%Y-%m-%d_%H-%M-%S-%f")[:-3]  # Incluir milisegundos
-            nombre_archivo = carpeta / f"{label}_{hora_str}.jpg"
+            #nombre_archivo = carpeta / f"{label}_{hora_str}.jpg"
+            nombre_archivo = carpeta / f"car_{hora_str}.jpg"
             cv2.imwrite(str(nombre_archivo), auto_recortado)
             print(f"[✔] Imagen guardada: {nombre_archivo}")
     
