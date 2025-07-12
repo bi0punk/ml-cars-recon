@@ -15,7 +15,7 @@ class OptimizedYOLOStreaming:
     def __init__(self, rtsp_url, model_path="yolov8n.pt"):
         self.model = YOLO(model_path)
         self.rtsp_url = rtsp_url
-        self.vehiculos_interes = ['car', 'bus']
+        self.vehiculos_interes = ['car', 'bus', 'cat']
         self.ultima_captura_por_vehiculo = {}  # NUEVO: para capturar múltiples autos
         self.skip_frames = 3
         self.frame_count = 0
