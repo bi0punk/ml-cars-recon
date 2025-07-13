@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Detección de Vehículos</title>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0d1117;
+      --text: #c9d1d9;
+      --accent: #58a6ff;
+      --card-bg: rgba(23, 25, 31, 0.8);
+      --shadow: 0 0 10px var(--accent);
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Orbitron', sans-serif;
+      display:flex; flex-direction:column; align-items:center; padding:20px;
+    }
+    h1 {
+      font-size:2rem;
+      color: var(--accent);
+      text-shadow: var(--shadow);
+      margin-bottom:10px;
+    }
+    .video-container {
+      position:relative;
+      width: 80%;
+      max-width:900px;
+      overflow:hidden;
+      border-radius:10px;
+      box-shadow: var(--shadow);
+      margin:20px 0;
+    }
+    .video-container img {
+      width:100%; display:block;
+    }
+    h2 {
+      font-size:1.5rem;
+      margin-top:20px;
+      letter-spacing:2px;
+    }
+    .captures-container {
+      display:grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px,1fr));
+      gap:20px;
+      width:80%; max-width:900px;
+      margin-top:10px;
+    }
+    .capture-card {
+      background: var(--card-bg);
+      border: 1px solid var(--accent);
+      border-radius:8px;
+      padding:15px;
+      text-align:center;
+      backdrop-filter: blur(5px);
+      transition: transform 0.3s, box-shadow 0.3s;
+    }
+    .capture-card:hover {
+      transform: translateY(-5px);
+      box-shadow: var(--shadow);
+    }
+    .capture-img {
+      width:100%; height:auto;
+      border-radius:5px;
+      margin-bottom:10px;
+    }
+    .capture-card p {
+      font-size:0.9rem;
+      color: var(--text);
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  <h1>Detección de Vehículos en Tiempo Real</h1>
+  <div class="video-container">
+    <img src="{{ url_for('video_feed') }}" alt="Stream de video en vivo">
+  </div>
+  <h2>Últimos vehículos detectados</h2>
+  <div class="captures-container" id="capturesContainer"></div>
+
+  <script>
+    async function updateCaptures() {
+      try {
+        const res = await fetch('/api/last_images');
+        if (!res.ok) {
+          console.error(`HTTP error fetching images: ${res.status}`);
+          return;
+        }
+        const text = await res.text();
+        let images = [];
+        try {
+          images = JSON.parse(text);
+          if (!Array.isArray(images)) throw new Error('Respuesta JSON no es un arreglo');
+        } catch (err) {
+          console.error('Error parseando JSON de /api/last_images:', err, '\nRespuesta recibida:', text);
+          return;
+        }
+
+        const container = document.getElementById('capturesContainer');
+        container.innerHTML = '';
+
+        images.forEach(image => {
+          const card = document.createElement('div');
+          card.className = 'capture-card';
+
+          const img = document.createElement('img');
+          img.src = `/captures/${encodeURIComponent(image)}`;
+          img.alt = image;
+          img.className = 'capture-img';
+
+          const caption = document.createElement('p');
+          caption.textContent = image;
+
+          card.append(img, caption);
+          container.appendChild(card);
+        });
+      } catch (e) {
+        console.error('Error en updateCaptures:', e);
+      }
+    }
+
+    // Actualizar cada 2 segundos
+    setInterval(updateCaptures, 2000);
+    updateCaptures(); // Carga inicial
+  </script>
+</body>
+</html>
