@@ -37,7 +37,7 @@ def serve_capture(filename):
 # Página principal
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('index2.html')
 
 if __name__ == '__main__':
     ip_camera_url = "rtsp://admin:123456@192.168.1.125:554/stream0"
