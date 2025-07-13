@@ -48,4 +48,4 @@ if __name__ == '__main__':
     processing_thread.daemon = True
     processing_thread.start()
     
-    app.run(host='0.0.0.0', port=5000, threaded=True)
+    app.run(host='0.0.0.0', port=8085, threaded=True)
