@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Detección de Vehículos</title>
+    <style>
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: Arial, sans-serif;
+        }
+        .video-container {
+            margin: 20px;
+            border: 2px solid #333;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        .captures-container {
+            display: flex;
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .capture-card {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+            text-align: center;
+            background-color: #f9f9f9;
+        }
+        .capture-img {
+            max-width: 300px;
+            max-height: 200px;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Detección de Vehículos en Tiempo Real</h1>
+        
+        <div class="video-container">
+            <img src="{{ url_for('video_feed') }}" width="800">
+        </div>
+        
+        <h2>Últimos vehículos detectados</h2>
+        <div class="captures-container" id="capturesContainer">
+            <!-- Las imágenes se cargarán dinámicamente -->
+        </div>
+    </div>
+
+    <script>
+        async function updateCaptures() {
+            const response = await fetch('/api/last_images');
+            const images = await response.json();
+            
+            const container = document.getElementById('capturesContainer');
+            container.innerHTML = '';
+            
+            images.forEach(image => {
+                const captureDiv = document.createElement('div');
+                captureDiv.className = 'capture-card';
+                
+                const img = document.createElement('img');
+                img.src = `/captures/${image}`;
+                img.className = 'capture-img';
+                img.alt = 'Vehículo detectado';
+                
+                const name = document.createElement('p');
+                name.textContent = image;
+                
+                captureDiv.appendChild(img);
+                captureDiv.appendChild(name);
+                container.appendChild(captureDiv);
+            });
+        }
+        
+        // Actualizar cada 2 segundos
+        setInterval(updateCaptures, 2000);
+        updateCaptures(); // Carga inicial
+    </script>
+</body>
+</html>
