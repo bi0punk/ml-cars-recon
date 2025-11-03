@@ -1,6 +1,36 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""
+RTSP Live + Detección Simple de Placa por Contornos
+---------------------------------------------------
+Este script muestra el video en vivo desde una cámara IP y detecta posibles
+regiones con forma de placa dentro de una zona central (ROI). La detección
+NO reconoce números, únicamente detecta el rectángulo típico de una placa
+basándose en contornos y proporciones.
+
+Cómo ejecutarlo:
+  python3 detecta_placas_rtsp.py --host 192.168.1.64 --user admin --password "TuClave" --channel 101
+
+Controles:
+  q → salir de la ventana
+
+Parámetros útiles:
+  --host       IP de la cámara
+  --user       Usuario
+  --password   Contraseña
+  --channel    Canal RTSP (101 = main stream, 102 = sub-stream)
+  --width      Ancho del frame mostrado
+  --height     Alto del frame mostrado
+
+Resultado:
+  Ventana en vivo mostrando:
+    - ROI central (zona donde se analiza)
+    - Si encuentra regiones tipo placa → texto "PLACA DETECTADA"
+    - Si no → "SIN DETECCION"
+"""
+
+
 import os, cv2, argparse
 import numpy as np
 
