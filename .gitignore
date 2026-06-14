@@ -1,30 +1,7 @@
-# Entornos virtuales
-venv/
-env/
-.tfenv/
-tfenv/
-.venv/
-__pycache__/
 *.pyc
-
-capturas/
-no_convertido/
-# Archivos temporales
-*.log
-*.tmp
-*.bak
-
-# Modelos y pesos
-*.pt
-*.pth
-runs/
-weights/
-
-# Capturas o salidas
-vehiculo_centrado_*.jpg
-
-# Jupyter
-.ipynb_checkpoints/
-
-# VSCode
-.vscode/
+__pycache__/
+.venv/
+venv/
+.env
+*.mp4
+*.avi
