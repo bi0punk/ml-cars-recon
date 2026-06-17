@@ -16,10 +16,24 @@ Python 3, Ultralytics YOLOv8, OpenCV, Flask
 | `basic_car_detector.py` | Basic car detection demo |
 | `web_app/` | Flask web interface |
 
+## Environment Variables
+
+Create a `.env` file or export:
+
+```env
+RTSP_USER=admin
+RTSP_PASS=your_password
+RTSP_HOST=192.168.1.64
+RTSP_PORT=554
+RTSP_PATH=/Streaming/Channels/101
+ISAPI_USER=admin
+ISAPI_PASSWORD=your_password
+```
+
 ## Usage
 
 ```bash
-pip install -r web_app/requiremens.txt
+pip install -r web_app/requirements.txt
 python app_yolo_patentes.py
 ```
 

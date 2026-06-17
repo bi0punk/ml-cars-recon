@@ -15,7 +15,7 @@ from flask import Flask, render_template, Response, jsonify, send_from_directory
 # ============================
 # Configuración por variables
 # ============================
-RTSP_URL           = os.getenv("RTSP_URL", "rtsp://admin:9H)p5x84@192.168.1.64:554/Streaming/Channels/102")
+RTSP_URL           = os.getenv("RTSP_URL", "")
 CAPTURE_DIR        = os.getenv("CAPTURE_DIR", "isapi_snaps")
 LATEST_LIMIT       = int(os.getenv("LATEST_LIMIT", "3"))
 
@@ -33,7 +33,7 @@ ROI_CY_PCT         = float(os.getenv("ROI_CY_PCT", "0.45"))   # centro Y (0.50 =
 # ISAPI (para snapshots cuando vehículo está totalmente dentro del ROI)
 ISAPI_HOST         = os.getenv("ISAPI_HOST", "192.168.1.64")
 ISAPI_USER         = os.getenv("ISAPI_USER", "admin")
-ISAPI_PASSWORD     = os.getenv("ISAPI_PASSWORD", "9H)p5x84")
+ISAPI_PASSWORD     = os.getenv("ISAPI_PASSWORD", "")
 SNAPSHOT_CHANNEL   = os.getenv("SNAPSHOT_CHANNEL", "101")      # main stream
 SNAPSHOT_COOLDOWN  = float(os.getenv("SNAPSHOT_COOLDOWN", "1.0"))  # seg entre snapshots
 

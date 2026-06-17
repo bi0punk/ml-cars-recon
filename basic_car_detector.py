@@ -3,8 +3,14 @@
 from ultralytics import YOLO
 import cv2
 import time
+import os
 
-SOURCE = 'rtsp://admin:9H)p5x84@192.168.1.64:554/Streaming/Channels/101'
+RTSP_USER = os.getenv("RTSP_USER", "admin")
+RTSP_PASS = os.getenv("RTSP_PASS", "")
+RTSP_HOST = os.getenv("RTSP_HOST", "192.168.1.64")
+RTSP_PORT = os.getenv("RTSP_PORT", "554")
+RTSP_PATH = os.getenv("RTSP_PATH", "/Streaming/Channels/101")
+SOURCE = f'rtsp://{RTSP_USER}:{RTSP_PASS}@{RTSP_HOST}:{RTSP_PORT}{RTSP_PATH}'
 CONFIDENCE = 0.35
 
 def main():
