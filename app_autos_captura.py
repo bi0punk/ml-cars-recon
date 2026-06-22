@@ -144,7 +144,9 @@ def main():
     ap = argparse.ArgumentParser(description="RTSP baja latencia + YOLOv8 + captura ISAPI")
     ap.add_argument("--host", default="192.168.1.64", help="IP de la cámara")
     ap.add_argument("--user", default="admin", help="Usuario de la cámara")
-    ap.add_argument("--password", required=True, help="Contraseña de la cámara")
+    # La contraseña también se puede configurar via la variable de entorno RTSP_PASSWORD
+    pwd_default = os.getenv("RTSP_PASSWORD", "default")
+    ap.add_argument("--password", default=pwd_default, help="Contraseña de la cámara (también via env RTSP_PASSWORD)")
 
     # Separación de canales: RTSP (detección) vs ISAPI (foto)
     ap.add_argument("--rtsp-channel", default="102", help="Canal RTSP para detección (102=sub recomendado)")
