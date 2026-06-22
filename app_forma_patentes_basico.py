@@ -31,8 +31,9 @@ Resultado:
 """
 
 
-import os, cv2, argparse
-import numpy as np
+import os
+import cv2
+import argparse
 
 # Forzar RTSP por TCP para estabilidad
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|max_delay;500000|stimeout;5000000"

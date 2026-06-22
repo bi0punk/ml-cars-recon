@@ -64,7 +64,7 @@ def save_isapi_snapshot(host, user, password, folder="captures_isapi", channel="
                 for chunk in r.iter_content(1024): f.write(chunk)
             print(f"[ISAPI] {fn}")
             return fn
-    except:
+    except Exception:
         pass
 
 

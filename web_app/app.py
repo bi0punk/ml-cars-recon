@@ -5,7 +5,6 @@ import os
 import cv2
 import time
 import glob
-import math
 import threading
 import requests
 from datetime import datetime
@@ -125,7 +124,7 @@ class DetectorCamera:
         try:
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             self.cap.set(cv2.CAP_PROP_FPS, 15)
-        except:
+        except Exception:
             pass
         self.last_open = time.time()
 
@@ -249,7 +248,7 @@ class DetectorCamera:
         try:
             if self.t.is_alive():
                 self.t.join(timeout=1.0)
-        except:
+        except Exception:
             pass
         if self.cap:
             self.cap.release()
@@ -299,4 +298,4 @@ def _shutdown():
     return "ok"
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")), debug=False, threaded=True)
+    app.run(host=os.getenv("HOST", "127.0.0.1"), port=int(os.getenv("PORT", "5000")), debug=False, threaded=True)

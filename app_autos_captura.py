@@ -90,13 +90,13 @@ class FrameGrabber:
         if self.cap is not None:
             try:
                 self.cap.release()
-            except:
+            except Exception:
                 pass
         self.cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
         # Algunos backends respetan buffersize=1
         try:
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        except:
+        except Exception:
             pass
         if self.cap.isOpened():
             self.ok = True
@@ -131,7 +131,7 @@ class FrameGrabber:
         self.stopped = True
         try:
             self.th.join(timeout=1)
-        except:
+        except Exception:
             pass
         if self.cap:
             self.cap.release()
@@ -164,7 +164,8 @@ def main():
     model = YOLO(args.model)
 
     # Construir URL RTSP (detección)
-    rtsp = f"rtsp://{args.user}:{args.password}@{args.host}:554/ISAPI/Streaming/channels/{args.rtsp-channel if hasattr(args,'rtsp-channel') else args.rtsp_channel}"
+    rtsp_ch = getattr(args, 'rtsp-channel', None) or args.rtsp_channel
+    rtsp = f"rtsp://{args.user}:{args.password}@{args.host}:554/ISAPI/Streaming/channels/{rtsp_ch}"
     # Nota: algunos modelos también aceptan /Streaming/Channels/<CH>; si hace falta, cámbialo.
 
     # Grabber de baja latencia
@@ -216,7 +217,10 @@ def main():
                         detected = True
                         xA, yA, xB, yB = box.xyxy[0].int().tolist()
                         # Reubica a coords globales (frame completo)
-                        xA += x0; yA += y0; xB += x0; yB += y0
+                        xA += x0
+                        yA += y0
+                        xB += x0
+                        yB += y0
                         cv2.rectangle(frame, (xA, yA), (xB, yB), (0, 255, 0), 2)
                         cv2.putText(frame, f"{label} {conf:.2f}", (xA, max(yA - 5, 20)),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)

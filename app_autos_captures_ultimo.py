@@ -97,28 +97,32 @@ def box_inside_roi(box, roi):
 
 class FrameGrabberLatest:
     """
-    [CAMBIO] Substream (detección): mantiene SOLO el último frame → baja latencia percibida.
+    [CAMBIO] Sub-stream (detección): solo conserva el frame más reciente (baja latencia).
     """
     def __init__(self, rtsp_url, width=None, height=None, name="sub"):
         self.rtsp_url = rtsp_url
         self.cap = None
         self.width = width
         self.height = height
+        self.name = name
         self.ok = False
         self.frame = None
         self.stopped = False
-        self.name = name
         self._open()
         self.th = threading.Thread(target=self._loop, daemon=True)
         self.th.start()
 
     def _open(self):
         if self.cap is not None:
-            try: self.cap.release()
-            except: pass
+            try:
+                self.cap.release()
+            except Exception:
+                pass
         self.cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
-        try: self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        except: pass
+        try:
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        except Exception:
+            pass
         self.ok = self.cap.isOpened()
         if not self.ok:
             print(f"[{self.name}] No pudo abrir RTSP")
@@ -143,8 +147,10 @@ class FrameGrabberLatest:
 
     def release(self):
         self.stopped = True
-        try: self.th.join(timeout=1)
-        except: pass
+        try:
+            self.th.join(timeout=1)
+        except Exception:
+            pass
         if self.cap:
             self.cap.release()
 
@@ -168,11 +174,15 @@ class FrameGrabberBuffer:
 
     def _open(self):
         if self.cap is not None:
-            try: self.cap.release()
-            except: pass
+            try:
+                self.cap.release()
+            except Exception:
+                pass
         self.cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
-        try: self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        except: pass
+        try:
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        except Exception:
+            pass
         self.ok = self.cap.isOpened()
         if not self.ok:
             print(f"[{self.name}] No pudo abrir RTSP")
@@ -204,8 +214,10 @@ class FrameGrabberBuffer:
 
     def release(self):
         self.stopped = True
-        try: self.th.join(timeout=1)
-        except: pass
+        try:
+            self.th.join(timeout=1)
+        except Exception:
+            pass
         if self.cap:
             self.cap.release()
 

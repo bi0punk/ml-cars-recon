@@ -107,7 +107,7 @@ class FrameGrabber:
         try:
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             self.cap.set(cv2.CAP_PROP_FPS, 15)
-        except:
+        except Exception:
             pass
         self.ok = self.cap.isOpened()
         self.last_open = time.time()
@@ -308,7 +308,7 @@ def main():
             if trigger_snapshot and (now - last_capture_ts) > args.cooldown:
                 if snapshot_thread is None or not snapshot_thread.is_alive():
                     last_capture_ts = now
-                    print(f"[EVENTO] Vehículo en ROI → Capturando ISAPI...")
+                    print("[EVENTO] Vehículo en ROI → Capturando ISAPI...")
                     snapshot_thread = threading.Thread(
                         target=save_isapi_snapshot,
                         args=(args.host, args.user, args.password),

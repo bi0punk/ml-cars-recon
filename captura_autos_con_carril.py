@@ -12,19 +12,16 @@ Correcciones:
 """
 
 import os
-import sys
 import cv2
 import time
 import argparse
 import logging
 import numpy as np
-import requests
 import threading
 from collections import deque
 from pathlib import Path
 from typing import Optional, Tuple, List
 from dataclasses import dataclass
-from requests.auth import HTTPDigestAuth
 from datetime import datetime
 from ultralytics import YOLO
 
@@ -284,7 +281,7 @@ class FrameGrabberLatest:
         if self.cap is not None:
             try:
                 self.cap.release()
-            except:
+            except Exception:
                 pass
         
         logger.info(f"[{self.name}] Conectando a: {self.rtsp_url}")
@@ -292,7 +289,7 @@ class FrameGrabberLatest:
         
         try:
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        except:
+        except Exception:
             pass
         
         is_opened = self.cap.isOpened()
@@ -361,7 +358,7 @@ class FrameGrabberLatest:
         self.stopped = True
         try:
             self.thread.join(timeout=3)
-        except:
+        except Exception:
             pass
         if self.cap:
             self.cap.release()
@@ -400,7 +397,7 @@ class FrameGrabberBuffer:
         if self.cap is not None:
             try:
                 self.cap.release()
-            except:
+            except Exception:
                 pass
         
         logger.info(f"[{self.name}] Conectando a: {self.rtsp_url}")
@@ -408,7 +405,7 @@ class FrameGrabberBuffer:
         
         try:
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        except:
+        except Exception:
             pass
         
         is_opened = self.cap.isOpened()
@@ -443,7 +440,7 @@ class FrameGrabberBuffer:
                 try:
                     frame = cv2.resize(frame, (self.width, self.height), 
                                        interpolation=cv2.INTER_AREA)
-                except:
+                except Exception:
                     continue
             
             with self.lock:
@@ -480,7 +477,7 @@ class FrameGrabberBuffer:
         self.stopped = True
         try:
             self.thread.join(timeout=3)
-        except:
+        except Exception:
             pass
         if self.cap:
             self.cap.release()
