@@ -1,7 +1,40 @@
-*.pyc
+# Python
 __pycache__/
+*.py[cod]
+*.egg-info/
 .venv/
 venv/
+env/
 .env
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ML models (large binaries)
+*.pt
+*.h5
+*.keras
+*.onnx
+*.pkl
+*.engine
+models/
+runs/
+
+# Data / datasets
+data/
+datasets/
+
+# Captures (runtime artifacts)
+captures_isapi/
+captures_preroll/
+captures_*/
+
+# Videos
 *.mp4
 *.avi
+*.mov
+*.mkv
+
+# OS
+.DS_Store
+Thumbs.db
