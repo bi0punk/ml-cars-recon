@@ -46,6 +46,16 @@ os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|max_delay;0|st
 # ============================
 app = Flask(__name__)
 
+API_TOKEN = os.getenv("API_TOKEN", "")
+
+
+def require_auth():
+    token = request.headers.get("X-API-Token")
+    if not API_TOKEN:
+        return
+    if not token or token != API_TOKEN:
+        abort(401, description="Unauthorized")
+
 # ============================
 # Utilidades
 # ============================
@@ -264,6 +274,7 @@ def index():
 
 @app.route("/video_feed")
 def video_feed():
+    require_auth()
     def gen():
         boundary = b"--frame"
         while True:
@@ -277,6 +288,7 @@ def video_feed():
 
 @app.route("/api/latest_images")
 def api_latest_images():
+    require_auth()
     imgs = list_latest_images(limit=LATEST_LIMIT)
     now = int(time.time())
     data = [{"name": f, "url": f"/captures/{f}?t={now}"} for f in imgs]
@@ -294,6 +306,7 @@ def captures(filename):
 
 @app.route("/_shutdown", methods=["POST"])
 def _shutdown():
+    require_auth()
     camera.stop()
     return "ok"
 

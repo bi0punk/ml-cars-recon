@@ -3,3 +3,4 @@ numpy
 requests
 ultralytics
 flask
+python-dotenv

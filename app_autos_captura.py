@@ -142,34 +142,41 @@ class FrameGrabber:
 
 def main():
     ap = argparse.ArgumentParser(description="RTSP baja latencia + YOLOv8 + captura ISAPI")
-    ap.add_argument("--host", default="192.168.1.64", help="IP de la cámara")
-    ap.add_argument("--user", default="admin", help="Usuario de la cámara")
-    # La contraseña también se puede configurar via la variable de entorno RTSP_PASSWORD
-    pwd_default = os.getenv("RTSP_PASSWORD", "default")
-    ap.add_argument("--password", default=pwd_default, help="Contraseña de la cámara (también via env RTSP_PASSWORD)")
+    ap.add_argument("--host", default=None, help="IP de la cámara")
+    ap.add_argument("--user", default=None, help="Usuario de la cámara")
+    ap.add_argument("--password", default=None, help="Contraseña de la cámara (o via env RTSP_PASSWORD)")
 
-    # Separación de canales: RTSP (detección) vs ISAPI (foto)
-    ap.add_argument("--rtsp-channel", default="102", help="Canal RTSP para detección (102=sub recomendado)")
-    ap.add_argument("--snapshot-channel", default="101", help="Canal ISAPI para snapshot (101=main recomendado)")
+    ap.add_argument("--rtsp-channel", default=None, help="Canal RTSP para detección (102=sub recomendado)")
+    ap.add_argument("--snapshot-channel", default=None, help="Canal ISAPI para snapshot (101=main recomendado)")
 
     ap.add_argument("--width", type=int, default=1280)
     ap.add_argument("--height", type=int, default=720)
-    ap.add_argument("--model", default="yolov8n.pt")
+    ap.add_argument("--model", default=None)
     ap.add_argument("--conf", type=float, default=0.45, help="Confianza mínima YOLO")
     ap.add_argument("--cooldown", type=float, default=0.8, help="Segundos entre snapshots")
     args = ap.parse_args()
 
-    # Cargar modelo YOLO
-    print(f"[INFO] Cargando modelo: {args.model}")
-    model = YOLO(args.model)
+    host = args.host or os.environ.get("RTSP_HOST", "192.168.1.64")
+    user = args.user or os.environ.get("RTSP_USER", "admin")
+    password = args.password or os.environ.get("RTSP_PASSWORD", "")
+    rtsp_channel = args.rtsp_channel or os.environ.get("RTSP_CHANNEL", "102")
+    snapshot_channel = args.snapshot_channel or os.environ.get("SNAPSHOT_CHANNEL", "101")
+    model_path = args.model or os.environ.get("YOLO_MODEL", "yolov8n.pt")
 
-    # Construir URL RTSP (detección)
-    rtsp_ch = getattr(args, 'rtsp-channel', None) or args.rtsp_channel
-    rtsp = f"rtsp://{args.user}:{args.password}@{args.host}:554/ISAPI/Streaming/channels/{rtsp_ch}"
-    # Nota: algunos modelos también aceptan /Streaming/Channels/<CH>; si hace falta, cámbialo.
+    if not password:
+        print("[ERROR] RTSP_PASSWORD debe estar definida en .env o pasar --password")
+        return
 
-    # Grabber de baja latencia
-    print(f"[INFO] Conectando RTSP (detección) canal {args.rtsp_channel}: {rtsp}")
+    if not os.path.exists(model_path):
+        print(f"[ERROR] Modelo no encontrado: {model_path}")
+        return
+
+    print(f"[INFO] Cargando modelo: {model_path}")
+    model = YOLO(model_path)
+
+    rtsp = f"rtsp://{user}:{password}@{host}:554/ISAPI/Streaming/channels/{rtsp_channel}"
+
+    print(f"[INFO] Conectando RTSP (detección) canal {rtsp_channel}: user={user}, host={host}")
     grab = FrameGrabber(rtsp, width=args.width, height=args.height)
 
     print("[INFO] Transmisión iniciada. Presiona 'q' para salir.")
@@ -235,8 +242,8 @@ def main():
                 print("[EVENTO] Vehículo COMPLETO en ROI → capturando ISAPI (async)...")
                 threading.Thread(
                     target=save_isapi_snapshot,
-                    args=(args.host, args.user, args.password),
-                    kwargs={"folder": "isapi_snaps", "channel": args.snapshot_channel, "timeout": 4},
+                    args=(host, user, password),
+                    kwargs={"folder": "isapi_snaps", "channel": snapshot_channel, "timeout": 4},
                     daemon=True
                 ).start()
 
