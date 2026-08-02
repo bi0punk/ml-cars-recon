@@ -1,9 +1,10 @@
 # detect_cars.py
 # Requiere: pip install ultralytics opencv-python
-from ultralytics import YOLO
-import cv2
-import time
 import os
+import time
+
+import cv2
+from ultralytics import YOLO
 
 RTSP_USER = os.getenv("RTSP_USER", "admin")
 RTSP_PASS = os.getenv("RTSP_PASS", "")

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """
 RTSP + Detección YOLOv8 + Captura ISAPI (baja latencia)
@@ -14,16 +13,20 @@ Uso:
       --rtsp-channel 102 --snapshot-channel 101 --model yolov8n.pt
 """
 
-import os
-import cv2
-import time
 import argparse
+import contextlib
+import os
+import threading
+import time
+from datetime import datetime
+
+import cv2
 import numpy as np
 import requests
-import threading
 from requests.auth import HTTPDigestAuth
-from datetime import datetime
 from ultralytics import YOLO
+
+from common.geometry import box_inside_roi
 
 # =========================================
 # Opciones FFmpeg para BAJA LATENCIA
@@ -62,12 +65,6 @@ def save_isapi_snapshot(host, user, password, folder="captures", channel="101", 
     except Exception as e:
         print(f"[ISAPI] Error al obtener snapshot: {e}")
 
-def box_inside_roi(box, roi):
-    # box=(x1,y1,x2,y2); roi=(x1,y1,x2,y2)
-    x1,y1,x2,y2 = box
-    rx1,ry1,rx2,ry2 = roi
-    return x1 >= rx1 and y1 >= ry1 and x2 <= rx2 and y2 <= ry2
-
 class FrameGrabber:
     """
     Hilo lector que siempre deja disponible el ÚLTIMO frame (descarta los viejos).
@@ -88,16 +85,12 @@ class FrameGrabber:
 
     def _open(self):
         if self.cap is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.cap.release()
-            except Exception:
-                pass
         self.cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
         # Algunos backends respetan buffersize=1
-        try:
+        with contextlib.suppress(Exception):
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        except Exception:
-            pass
         if self.cap.isOpened():
             self.ok = True
         else:
@@ -129,10 +122,8 @@ class FrameGrabber:
 
     def release(self):
         self.stopped = True
-        try:
+        with contextlib.suppress(Exception):
             self.th.join(timeout=1)
-        except Exception:
-            pass
         if self.cap:
             self.cap.release()
 

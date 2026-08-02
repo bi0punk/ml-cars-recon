@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """
 RTSP Live + Detección Simple de Placa por Contornos
@@ -31,9 +30,10 @@ Resultado:
 """
 
 
-import os
-import cv2
 import argparse
+import os
+
+import cv2
 
 # Forzar RTSP por TCP para estabilidad
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|max_delay;500000|stimeout;5000000"

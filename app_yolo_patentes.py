@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
-import os
-import cv2
-import time
 import argparse
+import os
+import time
+
+import cv2
 import numpy as np
 from ultralytics import YOLO
 
@@ -95,7 +95,10 @@ def main():
                 if any(k in label.lower() for k in ["car", "plate", "license", "truck", "vehicle"]):
                     detected = True
                     xA, yA, xB, yB = box.xyxy[0].int().tolist()
-                    xA += x0; yA += y0; xB += x0; yB += y0
+                    xA += x0
+                    yA += y0
+                    xB += x0
+                    yB += y0
                     cv2.rectangle(frame, (xA, yA), (xB, yB), (0, 255, 0), 2)
                     cv2.putText(frame, f"{label} {conf_val:.2f}", (xA, max(yA - 5, 20)),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)

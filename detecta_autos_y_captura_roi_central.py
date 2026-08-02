@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """
 RTSP + Detección YOLOv8 + Captura ISAPI (baja latencia)
@@ -14,16 +13,19 @@ Uso:
       --rtsp-channel 102 --snapshot-channel 101 --model yolov8n.pt
 """
 
-import os
-import cv2
-import time
 import argparse
+import os
+import threading
+import time
+from datetime import datetime
+
+import cv2
 import numpy as np
 import requests
-import threading
 from requests.auth import HTTPDigestAuth
-from datetime import datetime
 from ultralytics import YOLO
+
+from common.geometry import box_inside_roi
 
 # =========================================
 # Opciones FFmpeg para BAJA LATENCIA
@@ -72,13 +74,6 @@ def save_isapi_snapshot(host, user, password, folder="captures", channel="101", 
     except Exception as e:
         print(f"[ISAPI] Error: {e}")
     return None
-
-
-def box_inside_roi(box, roi):
-    """Verifica si una caja está completamente dentro del ROI."""
-    x1, y1, x2, y2 = box
-    rx1, ry1, rx2, ry2 = roi
-    return (x1 >= rx1 and y1 >= ry1 and x2 <= rx2 and y2 <= ry2)
 
 
 class FrameGrabber:
@@ -184,6 +179,9 @@ def main():
     if not os.path.exists(model_path):
         print(f"[ERROR] Modelo no encontrado: {model_path}")
         return
+
+    print(f"[INFO] Cargando modelo YOLO: {model_path}")
+    model = YOLO(model_path)
 
     rtsp_url = f"rtsp://{user}:{password}@{host}:554/ISAPI/Streaming/channels/{rtsp_channel}01"
 
@@ -310,17 +308,20 @@ def main():
 
             # Captura ISAPI (cooldown)
             now = time.time()
-            if trigger_snapshot and (now - last_capture_ts) > args.cooldown:
-                if snapshot_thread is None or not snapshot_thread.is_alive():
-                    last_capture_ts = now
-                    print("[EVENTO] Vehículo en ROI → Capturando ISAPI...")
-                    snapshot_thread = threading.Thread(
-                        target=save_isapi_snapshot,
-                        args=(host, user, password),
-                        kwargs={"folder": "isapi_snaps", "channel": snapshot_channel, "timeout": 3},
-                        daemon=True
-                    )
-                    snapshot_thread.start()
+            if (
+                trigger_snapshot
+                and (now - last_capture_ts) > args.cooldown
+                and (snapshot_thread is None or not snapshot_thread.is_alive())
+            ):
+                last_capture_ts = now
+                print("[EVENTO] Vehículo en ROI → Capturando ISAPI...")
+                snapshot_thread = threading.Thread(
+                    target=save_isapi_snapshot,
+                    args=(host, user, password),
+                    kwargs={"folder": "isapi_snaps", "channel": snapshot_channel, "timeout": 3},
+                    daemon=True
+                )
+                snapshot_thread.start()
 
             # FPS
             fps_counter += 1

@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
-import os
-import cv2
-import time
 import glob
+import os
 import threading
-import requests
+import time
 from datetime import datetime
+
+import cv2
+import requests
+from flask import Flask, Response, abort, jsonify, render_template, request, send_from_directory
 from requests.auth import HTTPDigestAuth
-from flask import Flask, render_template, Response, jsonify, send_from_directory, abort
+
+from common.geometry import box_inside_roi
 
 # ============================
 # Configuración por variables
@@ -85,13 +87,8 @@ def save_isapi_snapshot(folder=CAPTURE_DIR, timeout=3):
     except requests.exceptions.Timeout:
         print("[ISAPI] Timeout snapshot")
     except Exception as e:
-        print(f"[ISAPI] Error: {e}")
+            print(f"[ISAPI] Error: {e}")
     return None
-
-def box_inside_roi(box, roi):
-    x1, y1, x2, y2 = box
-    rx1, ry1, rx2, ry2 = roi
-    return (x1 >= rx1 and y1 >= ry1 and x2 <= rx2 and y2 <= ry2)
 
 # ============================
 # Carga de modelo YOLO (una vez)

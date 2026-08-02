@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """
 RTSP + YOLOv8 + Captura con PRE-ROLL desde MAIN stream (buffer circular)
@@ -15,17 +14,22 @@ Uso:
     --rtsp_channel 102 --snapshot_channel 101 --model yolov8n.pt --pre_roll_ms 300
 """
 
-import os
-import cv2
-import time
 import argparse
+import contextlib
+import os
+import threading
+import time
+from collections import deque
+from datetime import datetime
+
+import cv2
 import numpy as np
 import requests
-import threading
-from collections import deque
 from requests.auth import HTTPDigestAuth
-from datetime import datetime
 from ultralytics import YOLO
+
+from common.geometry import box_inside_roi
+
 
 # =============================================================================
 # FFmpeg: BAJA LATENCIA
@@ -85,12 +89,6 @@ def save_isapi_snapshot(host, user, password, folder="captures_isapi", channel="
     except Exception as e:
         print(f"[ISAPI] Error al obtener snapshot: {e}")
 
-def box_inside_roi(box, roi):
-    # box=(x1,y1,x2,y2); roi=(x1,y1,x2,y2)
-    x1,y1,x2,y2 = box
-    rx1,ry1,rx2,ry2 = roi
-    return x1 >= rx1 and y1 >= ry1 and x2 <= rx2 and y2 <= ry2
-
 # =============================================================================
 # GRABBERS
 # =============================================================================
@@ -114,15 +112,11 @@ class FrameGrabberLatest:
 
     def _open(self):
         if self.cap is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.cap.release()
-            except Exception:
-                pass
         self.cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
-        try:
+        with contextlib.suppress(Exception):
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        except Exception:
-            pass
         self.ok = self.cap.isOpened()
         if not self.ok:
             print(f"[{self.name}] No pudo abrir RTSP")
@@ -147,10 +141,8 @@ class FrameGrabberLatest:
 
     def release(self):
         self.stopped = True
-        try:
+        with contextlib.suppress(Exception):
             self.th.join(timeout=1)
-        except Exception:
-            pass
         if self.cap:
             self.cap.release()
 
@@ -174,15 +166,11 @@ class FrameGrabberBuffer:
 
     def _open(self):
         if self.cap is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.cap.release()
-            except Exception:
-                pass
         self.cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
-        try:
+        with contextlib.suppress(Exception):
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        except Exception:
-            pass
         self.ok = self.cap.isOpened()
         if not self.ok:
             print(f"[{self.name}] No pudo abrir RTSP")
@@ -214,10 +202,8 @@ class FrameGrabberBuffer:
 
     def release(self):
         self.stopped = True
-        try:
+        with contextlib.suppress(Exception):
             self.th.join(timeout=1)
-        except Exception:
-            pass
         if self.cap:
             self.cap.release()
 
@@ -316,7 +302,10 @@ def main():
                         detected = True
                         xA, yA, xB, yB = box.xyxy[0].int().tolist()
                         # Reubica a coords globales (frame completo)
-                        xA += x0; yA += y0; xB += x0; yB += y0
+                        xA += x0
+                        yA += y0
+                        xB += x0
+                        yB += y0
                         cv2.rectangle(frame, (xA, yA), (xB, yB), (0, 255, 0), 2)
                         cv2.putText(frame, f"{label} {conf:.2f}", (xA, max(yA - 5, 20)),
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
@@ -330,7 +319,7 @@ def main():
                 last_capture_ts = now
                 target_ts = now - (args.pre_roll_ms / 1000.0)
 
-                def _async_save():
+                def _async_save(target_ts=target_ts, frame=frame):
                     cand = grab_main.get_closest(target_ts)
                     if cand is not None:
                         save_jpeg(cand, folder=args.save_dir, prefix="main_preroll")

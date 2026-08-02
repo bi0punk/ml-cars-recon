@@ -1,7 +1,7 @@
-def box_inside_roi(box, roi):
+def box_inside_roi(box, roi, margin=0):
     x1, y1, x2, y2 = box
     rx1, ry1, rx2, ry2 = roi
-    return (x1 >= rx1 and y1 >= ry1 and x2 <= rx2 and y2 <= ry2)
+    return (x1 >= rx1 + margin and y1 >= ry1 + margin and x2 <= rx2 - margin and y2 <= ry2 - margin)
 
 
 def compute_roi(frame_w, frame_h, roi_w=0.50, roi_h=0.70, roi_cy=0.40):

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """
 RTSP + YOLOv8 + Detección de Carretera + Captura PRE-ROLL (v2.1 - BUG FIXES)
@@ -11,18 +10,19 @@ Correcciones:
 - Timeout de espera mejorado
 """
 
-import os
-import cv2
-import time
 import argparse
+import contextlib
 import logging
-import numpy as np
+import os
 import threading
+import time
 from collections import deque
-from pathlib import Path
-from typing import Optional, Tuple, List
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
+
+import cv2
+import numpy as np
 from ultralytics import YOLO
 
 # =============================================================================
@@ -98,7 +98,7 @@ def configure_ffmpeg_low_latency(transport: str = "udp") -> None:
 class LaneDetector:
     """Detector de carriles usando Canny + Hough Transform"""
     
-    def __init__(self, roi_vertices: Optional[np.ndarray] = None):
+    def __init__(self, roi_vertices: np.ndarray | None = None):
         self.roi_vertices = roi_vertices
         self.canny_low = 50
         self.canny_high = 150
@@ -114,7 +114,7 @@ class LaneDetector:
         cv2.fillPoly(mask, vertices, 255)
         return cv2.bitwise_and(img, mask)
     
-    def _calculate_slope_intercept(self, line: np.ndarray) -> Tuple[float, float]:
+    def _calculate_slope_intercept(self, line: np.ndarray) -> tuple[float, float]:
         """Calcula pendiente e intercepto"""
         x1, y1, x2, y2 = line
         if x2 - x1 == 0:
@@ -123,7 +123,7 @@ class LaneDetector:
         intercept = y1 - slope * x1
         return slope, intercept
     
-    def _separate_lines(self, lines: np.ndarray) -> Tuple[List, List]:
+    def _separate_lines(self, lines: np.ndarray) -> tuple[list, list]:
         """Separa líneas izquierda/derecha"""
         left_lines = []
         right_lines = []
@@ -145,7 +145,7 @@ class LaneDetector:
         
         return left_lines, right_lines
     
-    def _average_lines(self, lines: List, y1: int, y2: int) -> Optional[np.ndarray]:
+    def _average_lines(self, lines: list, y1: int, y2: int) -> np.ndarray | None:
         """Promedia líneas"""
         if not lines:
             return None
@@ -157,7 +157,7 @@ class LaneDetector:
         x2 = int((y2 - avg_intercept) / avg_slope)
         return np.array([x1, y1, x2, y2])
     
-    def detect(self, frame: np.ndarray) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    def detect(self, frame: np.ndarray) -> tuple[np.ndarray | None, np.ndarray | None]:
         """Detecta carriles"""
         height, width = frame.shape[:2]
         
@@ -189,8 +189,8 @@ class LaneDetector:
         
         return left_lane, right_lane
     
-    def draw_lanes(self, frame: np.ndarray, left_lane: Optional[np.ndarray], 
-                   right_lane: Optional[np.ndarray]) -> np.ndarray:
+    def draw_lanes(self, frame: np.ndarray, left_lane: np.ndarray | None, 
+                   right_lane: np.ndarray | None) -> np.ndarray:
         """Dibuja carriles"""
         overlay = frame.copy()
         
@@ -239,8 +239,8 @@ def save_frame_jpeg(frame: np.ndarray, folder: str = "captures",
     logger.info(f"Frame guardado: {filepath}")
     return str(filepath)
 
-def is_box_inside_roi(box: Tuple[int, int, int, int], 
-                      roi: Tuple[int, int, int, int]) -> bool:
+def is_box_inside_roi(box: tuple[int, int, int, int], 
+                      roi: tuple[int, int, int, int]) -> bool:
     """Verifica si bounding box está en ROI"""
     x1, y1, x2, y2 = box
     rx1, ry1, rx2, ry2 = roi
@@ -253,14 +253,14 @@ def is_box_inside_roi(box: Tuple[int, int, int, int],
 class FrameGrabberLatest:
     """Grabber con último frame - VERSIÓN CORREGIDA"""
     
-    def __init__(self, rtsp_url: str, width: Optional[int] = None, 
-                 height: Optional[int] = None, name: str = "sub"):
+    def __init__(self, rtsp_url: str, width: int | None = None, 
+                 height: int | None = None, name: str = "sub"):
         self.rtsp_url = rtsp_url
         self.width = width
         self.height = height
         self.name = name
-        self.cap: Optional[cv2.VideoCapture] = None
-        self.frame: Optional[np.ndarray] = None
+        self.cap: cv2.VideoCapture | None = None
+        self.frame: np.ndarray | None = None
         self.ok = False
         self.stopped = False
         self.lock = threading.Lock()
@@ -279,18 +279,14 @@ class FrameGrabberLatest:
     def _open_stream(self) -> bool:
         """Abre conexión RTSP - retorna True si exitoso"""
         if self.cap is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.cap.release()
-            except Exception:
-                pass
         
         logger.info(f"[{self.name}] Conectando a: {self.rtsp_url}")
         self.cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
         
-        try:
+        with contextlib.suppress(Exception):
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        except Exception:
-            pass
         
         is_opened = self.cap.isOpened()
         if is_opened:
@@ -307,10 +303,9 @@ class FrameGrabberLatest:
         
         while not self.stopped:
             # Intentar abrir stream
-            if self.cap is None or not self.cap.isOpened():
-                if not self._open_stream():
-                    time.sleep(reconnect_delay)
-                    continue
+            if (self.cap is None or not self.cap.isOpened()) and not self._open_stream():
+                time.sleep(reconnect_delay)
+                continue
             
             # Leer frame
             ret, frame = self.cap.read()
@@ -345,7 +340,7 @@ class FrameGrabberLatest:
                 self.ready.set()
                 logger.info(f"[{self.name}] Primer frame recibido")
     
-    def read(self) -> Tuple[bool, Optional[np.ndarray]]:
+    def read(self) -> tuple[bool, np.ndarray | None]:
         """Lee el último frame - FIX: retorna copia"""
         with self.lock:
             if self.frame is None:
@@ -356,10 +351,8 @@ class FrameGrabberLatest:
         """Libera recursos"""
         logger.info(f"[{self.name}] Liberando recursos...")
         self.stopped = True
-        try:
+        with contextlib.suppress(Exception):
             self.thread.join(timeout=3)
-        except Exception:
-            pass
         if self.cap:
             self.cap.release()
         logger.info(f"[{self.name}] Liberado")
@@ -369,14 +362,14 @@ class FrameGrabberBuffer:
     """Grabber con buffer circular - VERSIÓN CORREGIDA"""
     
     def __init__(self, rtsp_url: str, max_seconds: float = 1.5, 
-                 fps_hint: int = 25, width: Optional[int] = None, 
-                 height: Optional[int] = None, name: str = "main"):
+                 fps_hint: int = 25, width: int | None = None, 
+                 height: int | None = None, name: str = "main"):
         self.rtsp_url = rtsp_url
         self.width = width
         self.height = height
         self.name = name
         self.max_buffer_size = int(max_seconds * max(fps_hint, 1)) + 5
-        self.cap: Optional[cv2.VideoCapture] = None
+        self.cap: cv2.VideoCapture | None = None
         self.buffer: deque = deque(maxlen=self.max_buffer_size)
         self.ok = False
         self.stopped = False
@@ -395,18 +388,14 @@ class FrameGrabberBuffer:
     def _open_stream(self) -> bool:
         """Abre stream"""
         if self.cap is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self.cap.release()
-            except Exception:
-                pass
         
         logger.info(f"[{self.name}] Conectando a: {self.rtsp_url}")
         self.cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
         
-        try:
+        with contextlib.suppress(Exception):
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        except Exception:
-            pass
         
         is_opened = self.cap.isOpened()
         if is_opened:
@@ -422,10 +411,9 @@ class FrameGrabberBuffer:
         first_frame_received = False
         
         while not self.stopped:
-            if self.cap is None or not self.cap.isOpened():
-                if not self._open_stream():
-                    time.sleep(reconnect_delay)
-                    continue
+            if (self.cap is None or not self.cap.isOpened()) and not self._open_stream():
+                time.sleep(reconnect_delay)
+                continue
             
             ret, frame = self.cap.read()
             
@@ -452,7 +440,7 @@ class FrameGrabberBuffer:
                 self.ready.set()
                 logger.info(f"[{self.name}] Buffer recibiendo frames")
     
-    def get_closest_frame(self, target_timestamp: float) -> Optional[np.ndarray]:
+    def get_closest_frame(self, target_timestamp: float) -> np.ndarray | None:
         """Obtiene frame más cercano al timestamp"""
         with self.lock:
             if not self.buffer:
@@ -475,10 +463,8 @@ class FrameGrabberBuffer:
         """Libera recursos"""
         logger.info(f"[{self.name}] Liberando...")
         self.stopped = True
-        try:
+        with contextlib.suppress(Exception):
             self.thread.join(timeout=3)
-        except Exception:
-            pass
         if self.cap:
             self.cap.release()
         logger.info(f"[{self.name}] Liberado")
@@ -548,7 +534,7 @@ class VehicleDetectionSystem:
         return (f"rtsp://{self.camera_config.user}:{self.camera_config.password}@"
                 f"{self.camera_config.host}:554/ISAPI/Streaming/channels/{channel}")
     
-    def _calculate_roi(self, width: int, height: int) -> Tuple[int, int, int, int]:
+    def _calculate_roi(self, width: int, height: int) -> tuple[int, int, int, int]:
         """Calcula ROI"""
         roi_w = int(width * self.roi_config.width_ratio)
         roi_h = int(height * self.roi_config.height_ratio)
@@ -556,15 +542,15 @@ class VehicleDetectionSystem:
         cy = int(height * self.roi_config.center_y_ratio)
         return (cx - roi_w // 2, cy - roi_h // 2, cx + roi_w // 2, cy + roi_h // 2)
     
-    def _draw_roi(self, frame: np.ndarray, roi: Tuple[int, int, int, int]) -> None:
+    def _draw_roi(self, frame: np.ndarray, roi: tuple[int, int, int, int]) -> None:
         """Dibuja ROI"""
         x1, y1, x2, y2 = roi
         cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0), 2)
         cv2.putText(frame, "ROI", (x1 + 5, y1 + 20), 
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
     
-    def _detect_vehicles(self, frame: np.ndarray, roi: Tuple[int, int, int, int]) \
-            -> Tuple[bool, bool]:
+    def _detect_vehicles(self, frame: np.ndarray, roi: tuple[int, int, int, int]) \
+            -> tuple[bool, bool]:
         """Detecta vehículos"""
         x1, y1, x2, y2 = roi
         roi_frame = frame[y1:y2, x1:x2]
