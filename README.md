@@ -39,6 +39,14 @@ Computer vision system for vehicle detection and license plate capture from IP c
 
 ```
 ml-cars-recon/
+├── common/                           # Módulos compartidos (ver detalle abajo)
+│   ├── config.py                     # Helpers de env + dataclasses de configuración
+│   ├── utils.py                      # FFmpeg low-latency, directorios, JPEG, nitidez
+│   ├── rtsp.py                       # Builders de URLs RTSP (flavors streaming/ISAPI)
+│   ├── isapi.py                      # Snapshot vía ISAPI (Digest auth)
+│   ├── frames.py                     # Grabbers de frames en hilo (latest + buffer pre-roll)
+│   ├── lanes.py                      # Detector de carriles
+│   └── geometry.py                   # ROI y geometría de bounding boxes
 ├── app_yolo_patentes.py              # Detección YOLO de patentes
 ├── detecta_autos_y_captura_roi_central.py  # Conteo con ROI
 ├── captura_autos_con_carril.py       # Captura por carril
@@ -47,14 +55,24 @@ ml-cars-recon/
 ├── app_autos_captures_ultimo.py      # Captura con frame final
 ├── app_forma_patentes_basico.py      # Forma básica de patentes
 ├── testapp.py                        # App de prueba
-├── captures_isapi/                   # Capturas desde ISAPI
-├── captures_preroll/                 # Capturas pre-roll
 ├── web_app/                          # Interfaz web Flask
-├── tests/
+├── tests/                            # Smoke + tests unitarios de common/
 ├── requirements.txt
 ├── pyproject.toml
 ├── .env.example
 └── README.md
+```
+
+Todos los scripts comparten la lógica duplicada (grabbers, RTSP, ISAPI,
+conveniencia) a través de `common/`, en lugar de copiar y pegar el mismo código.
+
+Directorios de captura (runtime, excluidos de git):
+
+```
+captures_preroll/    # pre-roll del main-stream (captura por carril / testapp)
+captures_fallback/   # frames de respaldo del sub-stream
+captures_lpr/        # frames seleccionados por nitidez (LPR)
+isapi_snaps/         # snapshots descargados vía ISAPI
 ```
 
 ## Requisitos
@@ -115,7 +133,7 @@ GitHub Actions ejecuta ruff lint + pytest en cada push y PR.
 
 - Los pesos de modelos (`.pt`, `.h5`) y capturas están excluidos del control de versiones
 - Descargar `yolov8n.pt` desde Ultralytics o entrenar un modelo personalizado
-- Las capturas se guardan en `captures_isapi/` y `captures_preroll/`
+- Las capturas se guardan en `captures_preroll/`, `captures_fallback/`, `captures_lpr/` e `isapi_snaps/`
 
 ## Limitaciones / Roadmap
 

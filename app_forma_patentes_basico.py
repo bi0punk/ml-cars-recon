@@ -29,21 +29,23 @@ Resultado:
     - Si no → "SIN DETECCION"
 """
 
-
 import argparse
-import os
 
 import cv2
 
+from common.rtsp import build_streaming_url
+from common.utils import set_ffmpeg_low_latency_env
+
 # Forzar RTSP por TCP para estabilidad
-os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|max_delay;500000|stimeout;5000000"
+set_ffmpeg_low_latency_env("tcp")
+
 
 def detect_plate_like_regions(frame, roi_rect):
     """Detecta contornos tipo placa solo dentro del ROI."""
     (x0, y0, x1, y1) = roi_rect
     roi = frame[y0:y1, x0:x1]
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    blur = cv2.GaussianBlur(gray, (5,5), 0)
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
     edges = cv2.Canny(blur, 60, 180)
 
     contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -51,13 +53,14 @@ def detect_plate_like_regions(frame, roi_rect):
     H, W = gray.shape
     for c in contours:
         x, y, w, h = cv2.boundingRect(c)
-        area = w*h
+        area = w * h
         if area < 400 or area > 15000:
             continue
         aspect = w / float(h)
         if 2.0 <= aspect <= 6.5:  # proporción típica de placa
-            boxes.append((x+x0, y+y0, w, h))
+            boxes.append((x + x0, y + y0, w, h))
     return boxes
+
 
 def main():
     ap = argparse.ArgumentParser(description="RTSP en vivo + detección en zona central (fluido)")
@@ -69,7 +72,7 @@ def main():
     ap.add_argument("--height", type=int, default=720)
     args = ap.parse_args()
 
-    rtsp = f"rtsp://{args.user}:{args.password}@{args.host}:554/Streaming/Channels/{args.channel}"
+    rtsp = build_streaming_url(args.host, args.user, args.password, args.channel)
 
     cap = cv2.VideoCapture(rtsp, cv2.CAP_FFMPEG)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)
@@ -95,12 +98,7 @@ def main():
         roi_w = int(W * 0.50)
         roi_h = int(H * 0.70)
         cx, cy = W // 2, H // 2
-        roi_rect = (
-            cx - roi_w // 2,
-            cy - roi_h // 2,
-            cx + roi_w // 2,
-            cy + roi_h // 2
-        )
+        roi_rect = (cx - roi_w // 2, cy - roi_h // 2, cx + roi_w // 2, cy + roi_h // 2)
 
         # Detección dentro del ROI
         boxes = detect_plate_like_regions(frame, roi_rect)
@@ -123,11 +121,12 @@ def main():
         # Mostrar
         cv2.imshow("RTSP Live (ROI central)", frame)
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
     cap.release()
     cv2.destroyAllWindows()
+
 
 if __name__ == "__main__":
     main()

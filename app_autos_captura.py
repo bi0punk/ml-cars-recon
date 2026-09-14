@@ -2,7 +2,7 @@
 
 """
 RTSP + Detección YOLOv8 + Captura ISAPI (baja latencia)
--------------------------------------------------------------
+----------------------------------------------------------
 - Detecta vehículos en tiempo real con RTSP de baja latencia (sub-stream).
 - Solo toma captura ISAPI si el vehículo está COMPLETO dentro del ROI.
 - Captura ISAPI se lanza en hilo separado (no bloquea el loop).
@@ -14,122 +14,23 @@ Uso:
 """
 
 import argparse
-import contextlib
 import os
 import threading
 import time
-from datetime import datetime
 
 import cv2
 import numpy as np
-import requests
-from requests.auth import HTTPDigestAuth
 from ultralytics import YOLO
 
+from common.frames import FrameGrabber
 from common.geometry import box_inside_roi
+from common.isapi import save_isapi_snapshot
+from common.rtsp import build_isapi_url
+from common.utils import set_ffmpeg_low_latency_env
 
-# =========================================
-# Opciones FFmpeg para BAJA LATENCIA
-# =========================================
-# - rtsp_transport=tcp : robusto en LAN
-# - max_delay=0         : sin buffer adicional
-# - stimeout=5s         : timeout conexión
-# - buffer_size=0       : no prebuffer
-os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
-    "rtsp_transport;tcp|max_delay;0|stimeout;5000000|buffer_size;0"
-)
+# Opciones FFmpeg para BAJA LATENCIA (robusto en LAN)
+set_ffmpeg_low_latency_env("tcp")
 
-# =====================================================
-# UTILIDADES
-# =====================================================
-
-def save_isapi_snapshot(host, user, password, folder="captures", channel="101", timeout=4):
-    """
-    Descarga snapshot vía ISAPI usando autenticación Digest.
-    Se recomienda channel=101 (main) para máxima calidad.
-    """
-    try:
-        os.makedirs(folder, exist_ok=True)
-        url = f"http://{host}/ISAPI/Streaming/channels/{channel}/picture"
-        r = requests.get(url, auth=HTTPDigestAuth(user, password), timeout=timeout, stream=True)
-        if r.status_code == 200 and r.headers.get("Content-Type", "").startswith("image"):
-            ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")
-            filename = os.path.join(folder, f"{ts}_isapi_{channel}.jpg")
-            with open(filename, "wb") as f:
-                for chunk in r.iter_content(1024):
-                    f.write(chunk)
-            print(f"[ISAPI] Captura guardada: {filename}")
-            return filename
-        else:
-            print(f"[ISAPI] Error HTTP {r.status_code} / Content-Type={r.headers.get('Content-Type')}")
-    except Exception as e:
-        print(f"[ISAPI] Error al obtener snapshot: {e}")
-
-class FrameGrabber:
-    """
-    Hilo lector que siempre deja disponible el ÚLTIMO frame (descarta los viejos).
-    Esto reduce la latencia percibida en RTSP.
-    """
-    def __init__(self, rtsp_url, width=None, height=None):
-        self.rtsp_url = rtsp_url
-        self.cap = None
-        self.width = width
-        self.height = height
-        self.ok = False
-        self.frame = None
-        self.stopped = False
-        self.last_open = 0
-        self._open()
-        self.th = threading.Thread(target=self._loop, daemon=True)
-        self.th.start()
-
-    def _open(self):
-        if self.cap is not None:
-            with contextlib.suppress(Exception):
-                self.cap.release()
-        self.cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
-        # Algunos backends respetan buffersize=1
-        with contextlib.suppress(Exception):
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        if self.cap.isOpened():
-            self.ok = True
-        else:
-            self.ok = False
-
-    def _loop(self):
-        while not self.stopped:
-            if self.cap is None or not self.cap.isOpened():
-                # Reintento de reconexión cada 3s
-                if time.time() - self.last_open > 3:
-                    print("[WARN] RTSP perdido. Reintentando abrir...")
-                    self._open()
-                    self.last_open = time.time()
-                time.sleep(0.2)
-                continue
-            ok, f = self.cap.read()
-            if not ok:
-                self.ok = False
-                # pequeña pausa antes de reintentar leer
-                time.sleep(0.01)
-                continue
-            if f is not None:
-                if self.width and self.height:
-                    f = cv2.resize(f, (self.width, self.height), interpolation=cv2.INTER_AREA)
-                self.ok, self.frame = True, f
-
-    def read(self):
-        return self.ok, self.frame
-
-    def release(self):
-        self.stopped = True
-        with contextlib.suppress(Exception):
-            self.th.join(timeout=1)
-        if self.cap:
-            self.cap.release()
-
-# =====================================================
-# PROGRAMA PRINCIPAL
-# =====================================================
 
 def main():
     ap = argparse.ArgumentParser(description="RTSP baja latencia + YOLOv8 + captura ISAPI")
@@ -165,7 +66,7 @@ def main():
     print(f"[INFO] Cargando modelo: {model_path}")
     model = YOLO(model_path)
 
-    rtsp = f"rtsp://{user}:{password}@{host}:554/ISAPI/Streaming/channels/{rtsp_channel}"
+    rtsp = build_isapi_url(host, user, password, rtsp_channel)
 
     print(f"[INFO] Conectando RTSP (detección) canal {rtsp_channel}: user={user}, host={host}")
     grab = FrameGrabber(rtsp, width=args.width, height=args.height)
@@ -180,10 +81,9 @@ def main():
             if not ok or frame is None:
                 # Ventana de aviso mientras reconecta/lee
                 blank = np.zeros((args.height, args.width, 3), dtype=np.uint8)
-                cv2.putText(blank, "Reintentando conexión RTSP...", (60, args.height // 2),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+                cv2.putText(blank, "Reintentando conexión RTSP...", (60, args.height // 2), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
                 cv2.imshow("RTSP Live (YOLOv8 - ISAPI)", blank)
-                if cv2.waitKey(1) & 0xFF == ord('q'):
+                if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
                 time.sleep(0.05)
                 continue
@@ -220,8 +120,7 @@ def main():
                         xB += x0
                         yB += y0
                         cv2.rectangle(frame, (xA, yA), (xB, yB), (0, 255, 0), 2)
-                        cv2.putText(frame, f"{label} {conf:.2f}", (xA, max(yA - 5, 20)),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
+                        cv2.putText(frame, f"{label} {conf:.2f}", (xA, max(yA - 5, 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
 
                         if box_inside_roi((xA, yA, xB, yB), roi_rect):
                             trigger_snapshot = True
@@ -235,7 +134,7 @@ def main():
                     target=save_isapi_snapshot,
                     args=(host, user, password),
                     kwargs={"folder": "isapi_snaps", "channel": snapshot_channel, "timeout": 4},
-                    daemon=True
+                    daemon=True,
                 ).start()
 
             # Banner informativo
@@ -248,13 +147,14 @@ def main():
             cv2.imshow("RTSP Live (YOLOv8 - ISAPI)", frame)
 
             # Salir con 'q'
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
 
     finally:
         grab.release()
         cv2.destroyAllWindows()
         print("[INFO] Transmisión finalizada correctamente.")
+
 
 if __name__ == "__main__":
     main()

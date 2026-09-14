@@ -17,66 +17,21 @@ python3 cam_lpr_preroll_sharp.py \
 """
 
 import argparse
-import os
-import threading
 import time
-from collections import deque
-from datetime import datetime
 
 import cv2
 import numpy as np
-import requests
-from requests.auth import HTTPDigestAuth
 from ultralytics import YOLO
 
+from common.frames import FrameGrabberBuffer, FrameGrabberLatest
 from common.geometry import box_inside_roi
-
-
-def set_ffmpeg_low_latency_env(transport="udp"):
-    transport = transport.lower().strip()
-    if transport not in ("udp", "tcp"):
-        transport = "udp"
-    os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
-        f"rtsp_transport;{transport}|"
-        "max_delay;0|stimeout;5000000|buffer_size;0|fflags;nobuffer|flags;low_delay|reorder_queue_size;0"
-    )
-
-
-def ensure_dir(p):
-    os.makedirs(p, exist_ok=True)
-
-
-def save_jpeg(frame, folder="captures", prefix="frame"):
-    ensure_dir(folder)
-    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")
-    path = os.path.join(folder, f"{ts}_{prefix}.jpg")
-    cv2.imwrite(path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
-    print(f"[SAVE] {path}")
-    return path
-
-
-def save_isapi_snapshot(host, user, password, folder="captures_isapi", channel="101", timeout=4):
-    try:
-        ensure_dir(folder)
-        url = f"http://{host}/ISAPI/Streaming/channels/{channel}/picture"
-        r = requests.get(url, auth=HTTPDigestAuth(user, password), timeout=timeout, stream=True)
-        if r.status_code == 200:
-            ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")
-            fn = os.path.join(folder, f"{ts}_isapi.jpg")
-            with open(fn, "wb") as f:
-                for chunk in r.iter_content(1024):
-                    f.write(chunk)
-            print(f"[ISAPI] {fn}")
-            return fn
-    except Exception:
-        pass
-
-
-def sharpness(frame):
-    return cv2.Laplacian(frame, cv2.CV_64F).var()
+from common.isapi import save_isapi_snapshot
+from common.rtsp import build_isapi_url
+from common.utils import save_jpeg, set_ffmpeg_low_latency_env, sharpness
 
 
 def get_best_frame(buffer, target_ts, window_ms, min_f, max_f):
+    """Elige el frame más nítido dentro de la ventana temporal alrededor de target_ts."""
     if not buffer:
         return None
     w = window_ms / 1000.0
@@ -107,58 +62,6 @@ def draw_poly(img, pts):
     cv2.polylines(img, [pts], True, (0, 255, 255), 2)
 
 
-class GrabLatest:
-    def __init__(self, url, w, h):
-        self.w, self.h = w, h
-        self.cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
-        self.frame = None
-        self.ok = False
-        self.stop = False
-        threading.Thread(target=self.run, daemon=True).start()
-
-    def run(self):
-        while not self.stop:
-            ok, f = self.cap.read()
-            if ok and f is not None:
-                if self.w and self.h:
-                    f = cv2.resize(f, (self.w, self.h))
-                self.ok = True
-                self.frame = f
-
-    def read(self):
-        return self.ok, self.frame
-
-    def release(self):
-        self.stop = True
-        self.cap.release()
-
-
-class GrabBuffer:
-    def __init__(self, url, w, h, maxs=1.5, fps=25):
-        self.w, self.h = w, h
-        self.buf = deque(maxlen=int(maxs * fps) + 5)
-        self.cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
-        self.stop = False
-        self.ok = False
-        threading.Thread(target=self.run, daemon=True).start()
-
-    def run(self):
-        while not self.stop:
-            ok, f = self.cap.read()
-            if ok and f is not None:
-                if self.w and self.h:
-                    f = cv2.resize(f, (self.w, self.h))
-                self.ok = True
-                self.buf.append((time.time(), f))
-
-    def get(self):
-        return self.buf
-
-    def release(self):
-        self.stop = True
-        self.cap.release()
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="192.168.1.64")
@@ -172,8 +75,8 @@ def main():
     ap.add_argument("--conf", type=float, default=0.45)
     ap.add_argument("--pre_roll_ms", type=int, default=300)
     ap.add_argument("--sharp_window_ms", type=int, default=200)  # NEW
-    ap.add_argument("--sharp_min_frames", type=int, default=3)   # NEW
-    ap.add_argument("--sharp_max_frames", type=int, default=9)   # NEW
+    ap.add_argument("--sharp_min_frames", type=int, default=3)  # NEW
+    ap.add_argument("--sharp_max_frames", type=int, default=9)  # NEW
     ap.add_argument("--stable_frames", type=int, default=3)
     ap.add_argument("--rearm_frames", type=int, default=8)
     ap.add_argument("--inside_margin_px", type=int, default=8)
@@ -187,11 +90,11 @@ def main():
     set_ffmpeg_low_latency_env(args.rtsp_transport)
     model = YOLO(args.model)
 
-    sub = f"rtsp://{args.user}:{args.password}@{args.host}:554/ISAPI/Streaming/channels/{args.rtsp_channel}"
-    main = f"rtsp://{args.user}:{args.password}@{args.host}:554/ISAPI/Streaming/channels/{args.snapshot_channel}"
+    sub = build_isapi_url(args.host, args.user, args.password, args.rtsp_channel)
+    main = build_isapi_url(args.host, args.user, args.password, args.snapshot_channel)
 
-    gsub = GrabLatest(sub, args.width, args.height)
-    gmain = GrabBuffer(main, args.width, args.height)
+    gsub = FrameGrabberLatest(sub, args.width, args.height)
+    gmain = FrameGrabberBuffer(main, args.width, args.height)
 
     inside = 0
     outside = 0
@@ -252,7 +155,7 @@ def main():
             inside = 0
             outside += 1
 
-        do = (inside >= args.stable_frames and not triggered)
+        do = inside >= args.stable_frames and not triggered
 
         if outside >= args.rearm_frames:
             triggered = False
@@ -262,7 +165,7 @@ def main():
             triggered = True
             last = now
             ts = now - (args.pre_roll_ms / 1000.0)
-            buf = gmain.get()
+            buf = gmain.get_frames_in_window(ts, args.sharp_window_ms)
             bestf = get_best_frame(buf, ts, args.sharp_window_ms, args.sharp_min_frames, args.sharp_max_frames)
             if bestf is not None:
                 save_jpeg(bestf, args.save_dir, "best")
@@ -272,7 +175,7 @@ def main():
                     save_isapi_snapshot(args.host, args.user, args.password)
 
         cv2.imshow("LIVE", frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
     gsub.release()

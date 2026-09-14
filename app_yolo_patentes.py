@@ -8,7 +8,10 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 
-os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|max_delay;500000|stimeout;5000000"
+from common.rtsp import build_streaming_url
+from common.utils import set_ffmpeg_low_latency_env
+
+set_ffmpeg_low_latency_env("tcp")
 
 
 def open_stream(rtsp_url):
@@ -45,7 +48,7 @@ def main():
     print(f"[INFO] Cargando modelo: {model_path}")
     model = YOLO(model_path)
 
-    rtsp = f"rtsp://{user}:{password}@{host}:554/Streaming/Channels/{channel}"
+    rtsp = build_streaming_url(host, user, password, channel)
     print(f"[INFO] Conectando a: user={user}, host={host}, channel={channel}")
 
     cap = open_stream(rtsp)
@@ -60,8 +63,7 @@ def main():
         ok, frame = cap.read()
         if not ok:
             blank = np.zeros((720, 1280, 3), dtype=np.uint8)
-            cv2.putText(blank, "Reintentando conexion RTSP...", (80, 360),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+            cv2.putText(blank, "Reintentando conexion RTSP...", (80, 360), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
             cv2.imshow("RTSP Live (YOLOv8 - Estable)", blank)
             cv2.waitKey(1)
             if time.time() - last_retry > 3:
@@ -100,8 +102,7 @@ def main():
                     xB += x0
                     yB += y0
                     cv2.rectangle(frame, (xA, yA), (xB, yB), (0, 255, 0), 2)
-                    cv2.putText(frame, f"{label} {conf_val:.2f}", (xA, max(yA - 5, 20)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
+                    cv2.putText(frame, f"{label} {conf_val:.2f}", (xA, max(yA - 5, 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
 
         msg = "PLACA DETECTADA" if detected else "SIN DETECCION"
         color = (0, 200, 0) if detected else (0, 0, 255)
@@ -109,7 +110,7 @@ def main():
         cv2.putText(frame, msg, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
 
         cv2.imshow("RTSP Live (YOLOv8 - Estable)", frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
     cap.release()
