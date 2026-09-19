@@ -48,10 +48,7 @@ ISAPI_PASSWORD   = os.getenv("ISAPI_PASSWORD", "")
 SNAPSHOT_CHANNEL = os.getenv("SNAPSHOT_CHANNEL", "101")  # main stream
 SNAPSHOT_COOLDOWN = float(os.getenv("SNAPSHOT_COOLDOWN", "1.0"))  # seg entre snapshots
 
-os.makedirs(CAPTURE_DIR, exist_ok=True)
-
-# RTSP baja latencia
-set_ffmpeg_low_latency_env("tcp")
+# ``isapi.py`` crea el directorio de capturas si no existe (``os.makedirs``).
 
 API_TOKEN = os.getenv("API_TOKEN", "")
 
@@ -289,6 +286,9 @@ def reset_camera():
 # Flask
 # ============================
 def create_app():
+    # RTSP baja latencia (debe quedar seteado antes de crear la cámara)
+    set_ffmpeg_low_latency_env("tcp")
+
     app = Flask(__name__)
 
     @app.route("/")
