@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from common.config import env_value
+from common.detector import VehicleDetector
 from common.frames import FrameGrabberBuffer, FrameGrabberLatest
 from common.geometry import box_inside_roi, compute_roi
 from common.isapi import snapshot_url
@@ -399,3 +400,75 @@ class TestFrames:
             assert frame is not None
         finally:
             grabber.release()
+
+
+# ---------------------------------------------------------------------------
+# common.detector
+# ---------------------------------------------------------------------------
+class _FakeBox:
+    def __init__(self, x1, y1, x2, y2, cls, conf):
+        self.cls = np.array([cls], dtype=float)
+        self.conf = np.array([conf], dtype=float)
+        self.xyxy = np.array([[x1, y1, x2, y2]], dtype=float)
+
+
+class _FakeResult:
+    def __init__(self, boxes):
+        self.boxes = boxes
+
+
+class _FakeYolo:
+    names = {2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}
+
+    def __init__(self, boxes):
+        self._boxes = boxes
+        self.calls = 0
+
+    def predict(self, source, conf=0.45, classes=None, verbose=False):
+        self.calls += 1
+        return [_FakeResult(self._boxes)]
+
+
+class TestVehicleDetector:
+    @staticmethod
+    def make_frame():
+        return np.full((100, 100, 3), 60, dtype=np.uint8)
+
+    def test_detect_marks_vehicle_and_triggers_inside_roi(self):
+        roi = (10, 10, 90, 90)
+        box = _FakeBox(20, 20, 80, 80, 2, 0.9)  # completamente dentro del ROI
+        det = VehicleDetector(_FakeYolo([box]))
+        frame, detected, trigger = det.detect(self.make_frame(), roi)
+        assert detected is True
+        assert trigger is True
+        assert frame is not None
+
+    def test_detect_does_not_trigger_when_box_outside_roi(self):
+        roi = (10, 10, 90, 90)
+        box = _FakeBox(200, 200, 240, 240, 7, 0.8)  # fuera del ROI
+        det = VehicleDetector(_FakeYolo([box]))
+        frame, detected, trigger = det.detect(self.make_frame(), roi)
+        assert detected is True
+        assert trigger is False
+
+    def test_detect_tolerates_empty_boxes(self):
+        det = VehicleDetector(_FakeYolo([]))
+        frame, detected, trigger = det.detect(self.make_frame(), (10, 10, 90, 90))
+        assert detected is False
+        assert trigger is False
+
+    def test_trigger_if_ready_respects_cooldown(self, monkeypatch):
+        import common.detector as detector_mod
+
+        monkeypatch.setattr(detector_mod, "save_isapi_snapshot", lambda *a, **k: None)
+        det = VehicleDetector(_FakeYolo([]), cooldown=60.0)
+        assert det.trigger_if_ready("h", "u", "p", "101") is True
+        assert det.trigger_if_ready("h", "u", "p", "101") is False
+
+    def test_trigger_if_ready_respects_zero_cooldown(self, monkeypatch):
+        import common.detector as detector_mod
+
+        monkeypatch.setattr(detector_mod, "save_isapi_snapshot", lambda *a, **k: None)
+        det = VehicleDetector(_FakeYolo([]), cooldown=0.0)
+        assert det.trigger_if_ready("h", "u", "p", "101") is True
+        assert det.trigger_if_ready("h", "u", "p", "101") is True
