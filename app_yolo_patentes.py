@@ -29,6 +29,7 @@ def main():
     ap.add_argument("--width", type=int, default=1280)
     ap.add_argument("--height", type=int, default=720)
     ap.add_argument("--model", default=None)
+    ap.add_argument("--conf", type=float, default=0.45, help="Confianza mínima YOLO")
     args = ap.parse_args()
 
     host = args.host or os.environ.get("RTSP_HOST", "192.168.1.64")
@@ -86,7 +87,7 @@ def main():
         cv2.rectangle(frame, (x0, y0), (x1, y1), (255, 255, 0), 2)
 
         roi = frame[y0:y1, x0:x1]
-        results = model.predict(source=roi, conf=0.45, verbose=False)
+        results = model.predict(source=roi, conf=args.conf, verbose=False)
         detected = False
 
         for r in results:

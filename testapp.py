@@ -73,6 +73,7 @@ def main():
     ap.add_argument("--height", type=int, default=720)
     ap.add_argument("--model", default="yolov8n.pt")
     ap.add_argument("--conf", type=float, default=0.45)
+    ap.add_argument("--cooldown", type=float, default=0.5, help="Cooldown (s) entre capturas")
     ap.add_argument("--pre_roll_ms", type=int, default=300)
     ap.add_argument("--sharp_window_ms", type=int, default=200)  # NEW
     ap.add_argument("--sharp_min_frames", type=int, default=3)  # NEW
@@ -161,7 +162,7 @@ def main():
             triggered = False
 
         now = time.time()
-        if do and (now - last) > 0.5:  # small cooldown
+        if do and (now - last) > args.cooldown:  # cooldown configurable
             triggered = True
             last = now
             ts = now - (args.pre_roll_ms / 1000.0)
