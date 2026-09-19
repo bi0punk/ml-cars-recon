@@ -1,10 +1,13 @@
 """Captura de snapshots vía ISAPI (HTTP Digest) para cámaras IP."""
 
+import logging
 import os
 from datetime import datetime
 
 import requests
 from requests.auth import HTTPDigestAuth
+
+logger = logging.getLogger(__name__)
 
 
 def snapshot_url(host: str, channel: str = "101") -> str:
@@ -37,11 +40,15 @@ def save_isapi_snapshot(
             with open(filename, "wb") as f:
                 for chunk in response.iter_content(8192):
                     f.write(chunk)
-            print(f"[ISAPI] Captura guardada: {filename}")
+            logger.info("Captura ISAPI guardada: %s", filename)
             return filename
-        print(f"[ISAPI] Error HTTP {response.status_code} / Content-Type={response.headers.get('Content-Type')}")
+        logger.error(
+            "Error HTTP %s / Content-Type=%s",
+            response.status_code,
+            response.headers.get("Content-Type"),
+        )
     except requests.exceptions.Timeout:
-        print("[ISAPI] Timeout: No se pudo obtener snapshot")
+        logger.error("Timeout: no se pudo obtener snapshot ISAPI")
     except Exception as exc:
-        print(f"[ISAPI] Error: {exc}")
+        logger.error("Error capturando snapshot ISAPI: %s", exc)
     return None

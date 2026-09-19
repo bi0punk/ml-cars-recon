@@ -1,9 +1,12 @@
 """Shared helpers: FFmpeg low-latency setup, directory handling, JPEG saving."""
 
+import logging
 import os
 from datetime import datetime
 
 import cv2
+
+logger = logging.getLogger(__name__)
 
 FFMPEG_LOW_LATENCY_OPTIONS = (
     "rtsp_transport;{transport}|"
@@ -37,7 +40,7 @@ def save_jpeg(frame, folder="captures", prefix="frame", quality=95) -> str:
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")
     path = os.path.join(folder, f"{timestamp}_{prefix}.jpg")
     cv2.imwrite(path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
-    print(f"[SAVE] {path}")
+    logger.info("Imagen guardada: %s", path)
     return path
 
 
