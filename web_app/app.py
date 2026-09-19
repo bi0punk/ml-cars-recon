@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 
+"""Interfaz web Flask para ml-cars-recon.
+
+Sin efectos colaterales al importar: la cámara y el modelo YOLO se crean de
+forma perezosa (``get_camera``), por lo que importar este módulo no arranca
+hilos de captura ni carga modelos pesados.
+"""
+
 import glob
+import logging
 import os
 import threading
 import time
@@ -8,9 +16,12 @@ import time
 import cv2
 from flask import Flask, Response, abort, jsonify, render_template, request, send_from_directory
 
+from common.frames import FrameGrabberLatest
 from common.geometry import box_inside_roi, compute_roi
 from common.isapi import save_isapi_snapshot as _save_isapi_snapshot
 from common.utils import set_ffmpeg_low_latency_env
+
+logger = logging.getLogger(__name__)
 
 # ============================
 # Configuración por variables
@@ -42,12 +53,32 @@ os.makedirs(CAPTURE_DIR, exist_ok=True)
 # RTSP baja latencia
 set_ffmpeg_low_latency_env("tcp")
 
-# ============================
-# Flask
-# ============================
-app = Flask(__name__)
-
 API_TOKEN = os.getenv("API_TOKEN", "")
+
+# Clases de vehículos (COCO): car=2, motorcycle=3, bus=5, truck=7
+VEHICLE_CLASSES = [2, 3, 5, 7]
+VEHICLE_LABELS = {"2": "car", "3": "motorcycle", "5": "bus", "7": "truck"}
+
+_camera = None
+_model = None
+_model_lock = threading.Lock()
+
+
+def _get_model():
+    """Carga el modelo YOLO una sola vez (perezoso)."""
+    global _model
+    if _model is None:
+        with _model_lock:
+            if _model is None:
+                try:
+                    from ultralytics import YOLO
+
+                    _model = YOLO(MODEL_PATH)
+                    logger.info("Modelo YOLO cargado: %s", MODEL_PATH)
+                except Exception as e:
+                    _model = None
+                    logger.error("Error al cargar modelo YOLO: %s", e)
+    return _model
 
 
 def require_auth():
@@ -70,7 +101,7 @@ def list_latest_images(limit=LATEST_LIMIT):
 
 
 def save_isapi_snapshot(folder=CAPTURE_DIR, timeout=3):
-    """ Descarga snapshot vía ISAPI con Digest (usa la config del módulo). """
+    """Descarga snapshot vía ISAPI con Digest (usa la config del módulo)."""
     return _save_isapi_snapshot(
         ISAPI_HOST,
         ISAPI_USER,
@@ -82,73 +113,41 @@ def save_isapi_snapshot(folder=CAPTURE_DIR, timeout=3):
 
 
 # ============================
-# Carga de modelo YOLO (una vez)
-# ============================
-try:
-    from ultralytics import YOLO
-    model = YOLO(MODEL_PATH)
-    print(f"[YOLO] Modelo cargado: {MODEL_PATH}")
-except Exception as e:
-    model = None
-    print(f"[YOLO] ERROR al cargar modelo: {e}")
-
-# Clases de vehículos (COCO): car=2, motorcycle=3, bus=5, truck=7
-VEHICLE_CLASSES = [2, 3, 5, 7]
-VEHICLE_LABELS  = {"2": "car", "3": "motorcycle", "5": "bus", "7": "truck"}
-
-
-# ============================
 # Cámara con detección embebida
 # ============================
 class DetectorCamera:
-    def __init__(self, src):
+    """Captura frames vía ``FrameGrabberLatest`` y corre YOLO sobre el ROI.
+
+    La adquisición de frames (con reconexión robusta) la maneja el grabber
+    en su propio hilo; este hilo solo hace inferencia y anotación.
+    """
+
+    def __init__(self, src, model):
         self.src = src
-        self.cap = None
+        self.model = model
+        self.grabber = FrameGrabberLatest(src, name="web")
         self.frame = None  # frame procesado (con anotaciones)
         self.lock = threading.Lock()
         self.running = True
-        self.last_open = 0
-        self.reconnect_interval = 5
         self.frame_idx = 0
         self.last_snap_ts = 0.0
-        self._open()
+        self.stats = {
+            "frames_processed": 0,
+            "detections": 0,
+            "captures": 0,
+            "start_time": time.time(),
+        }
         self.t = threading.Thread(target=self._loop, daemon=True)
         self.t.start()
 
-    def _open(self):
-        if self.cap is not None:
-            self.cap.release()
-        self.cap = cv2.VideoCapture(self.src, cv2.CAP_FFMPEG)
-        try:
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            self.cap.set(cv2.CAP_PROP_FPS, 15)
-        except Exception:
-            pass
-        self.last_open = time.time()
-
     def _loop(self):
-        empty = 0
         while self.running:
-            if self.cap is None or not self.cap.isOpened():
-                if time.time() - self.last_open > self.reconnect_interval:
-                    print("[RTSP] Reconectando…")
-                    self._open()
-                time.sleep(0.2)
-                continue
-
-            ok, frame = self.cap.read()
+            ok, frame = self.grabber.read()
             if not ok or frame is None:
-                empty += 1
-                if empty > 30:
-                    print("[RTSP] Muchos frames vacíos. Reabriendo…")
-                    self._open()
-                    empty = 0
-                time.sleep(0.01)
+                time.sleep(0.05)
                 continue
-            empty = 0
-            self.frame_idx += 1
 
-            # Dibujo del frame con anotaciones
+            self.frame_idx += 1
             draw = frame.copy()
             H, W = draw.shape[:2]
 
@@ -165,12 +164,12 @@ class DetectorCamera:
             trigger_snapshot = False
 
             # Inference cada N frames para mantener FPS
-            do_infer = model is not None and (self.frame_idx % max(1, INFER_EVERY_N) == 0)
+            do_infer = self.model is not None and (self.frame_idx % max(1, INFER_EVERY_N) == 0)
 
             if do_infer and (x1 - x0) > 0 and (y1 - y0) > 0:
                 roi_region = draw[y0:y1, x0:x1]
                 try:
-                    results = model.predict(
+                    results = self.model.predict(
                         source=roi_region,
                         conf=YOLO_CONF,
                         classes=VEHICLE_CLASSES,
@@ -178,7 +177,7 @@ class DetectorCamera:
                         imgsz=IMG_SIZE,
                     )
                 except Exception as e:
-                    print(f"[YOLO] Predicción fallida: {e}")
+                    logger.error("Predicción YOLO fallida: %s", e)
                     results = []
             else:
                 results = []
@@ -199,10 +198,22 @@ class DetectorCamera:
                     detected = True
                     cv2.rectangle(draw, (xA_g, yA_g), (xB_g, yB_g), (0, 255, 0), 2)
                     label = VEHICLE_LABELS.get(str(cls_id), str(cls_id))
-                    cv2.putText(draw, f"{label} {conf:.2f}", (xA_g, max(yA_g - 5, 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                    cv2.putText(
+                        draw,
+                        f"{label} {conf:.2f}",
+                        (xA_g, max(yA_g - 5, 20)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (0, 255, 0),
+                        2,
+                    )
 
                     if box_inside_roi((xA_g, yA_g, xB_g, yB_g), roi_rect):
                         trigger_snapshot = True
+
+            if detected:
+                self.stats["detections"] += 1
+            self.stats["frames_processed"] += 1
 
             # Banner superior
             status_color = (0, 255, 0) if detected else (0, 0, 255)
@@ -211,12 +222,13 @@ class DetectorCamera:
             cv2.putText(draw, status_text, (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
 
             # Info ROI
-            cv2.putText(draw, f"ROI {x1-x0}x{y1-y0}", (10, H - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+            cv2.putText(draw, f"ROI {x1 - x0}x{y1 - y0}", (10, H - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
             # Snapshot con cooldown
             now = time.time()
             if trigger_snapshot and (now - self.last_snap_ts) > SNAPSHOT_COOLDOWN:
                 self.last_snap_ts = now
+                self.stats["captures"] += 1
                 threading.Thread(target=save_isapi_snapshot, daemon=True).start()
 
             # Publicamos frame procesado
@@ -232,6 +244,21 @@ class DetectorCamera:
             return None
         return buf.tobytes()
 
+    def status(self) -> dict:
+        """Estado de la cámara para monitoreo."""
+        runtime = max(time.time() - self.stats["start_time"], 0.001)
+        return {
+            "connected": self.grabber.ok,
+            "has_model": self.model is not None,
+            "reconnects": self.grabber.reconnect_count,
+            "stats": {
+                "frames_processed": self.stats["frames_processed"],
+                "detections": self.stats["detections"],
+                "captures": self.stats["captures"],
+                "fps": round(self.stats["frames_processed"] / runtime, 1),
+            },
+        }
+
     def stop(self):
         self.running = False
         try:
@@ -239,62 +266,87 @@ class DetectorCamera:
                 self.t.join(timeout=1.0)
         except Exception:
             pass
-        if self.cap:
-            self.cap.release()
+        self.grabber.release()
 
 
-camera = DetectorCamera(RTSP_URL)
+def get_camera():
+    """Crea (y cachea) la cámara de forma perezosa."""
+    global _camera
+    if _camera is None:
+        _camera = DetectorCamera(RTSP_URL, _get_model())
+    return _camera
+
+
+def reset_camera():
+    """Detiene y elimina la cámara actual (útil en tests/shutdown)."""
+    global _camera
+    if _camera is not None:
+        _camera.stop()
+        _camera = None
+
 
 # ============================
-# Rutas web
+# Flask
 # ============================
-@app.route("/")
-def index():
-    return render_template("index.html")
+def create_app():
+    app = Flask(__name__)
+
+    @app.route("/")
+    def index():
+        return render_template("index.html")
+
+    @app.route("/video_feed")
+    def video_feed():
+        require_auth()
+        camera = get_camera()
+
+        def gen():
+            boundary = b"--frame"
+            while True:
+                frame = camera.read_jpeg()
+                if frame is None:
+                    time.sleep(0.05)
+                    continue
+                yield boundary + b"\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
+                time.sleep(0.03)  # ~33 FPS máx; ajusta si quieres
+
+        return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
+
+    @app.route("/api/latest_images")
+    def api_latest_images():
+        require_auth()
+        imgs = list_latest_images(limit=LATEST_LIMIT)
+        now = int(time.time())
+        data = [{"name": f, "url": f"/captures/{f}?t={now}"} for f in imgs]
+        return jsonify(data)
+
+    @app.route("/api/status")
+    def api_status():
+        require_auth()
+        if _camera is None:
+            return jsonify({"active": False})
+        return jsonify({"active": True, **get_camera().status()})
+
+    @app.route("/captures/<path:filename>")
+    def captures(filename):
+        safe_dir = os.path.abspath(CAPTURE_DIR)
+        requested = os.path.abspath(os.path.join(CAPTURE_DIR, filename))
+        if not requested.startswith(safe_dir):
+            return abort(403)
+        if not os.path.exists(requested):
+            return abort(404)
+        return send_from_directory(CAPTURE_DIR, filename)
+
+    @app.route("/_shutdown", methods=["POST"])
+    def _shutdown():
+        require_auth()
+        reset_camera()
+        return "ok"
+
+    return app
 
 
-@app.route("/video_feed")
-def video_feed():
-    require_auth()
-
-    def gen():
-        boundary = b"--frame"
-        while True:
-            frame = camera.read_jpeg()
-            if frame is None:
-                time.sleep(0.05)
-                continue
-            yield boundary + b"\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
-            time.sleep(0.03)  # ~33 FPS máx; ajusta si quieres
-
-    return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
-
-
-@app.route("/api/latest_images")
-def api_latest_images():
-    require_auth()
-    imgs = list_latest_images(limit=LATEST_LIMIT)
-    now = int(time.time())
-    data = [{"name": f, "url": f"/captures/{f}?t={now}"} for f in imgs]
-    return jsonify(data)
-
-
-@app.route("/captures/<path:filename>")
-def captures(filename):
-    safe_dir = os.path.abspath(CAPTURE_DIR)
-    requested = os.path.abspath(os.path.join(CAPTURE_DIR, filename))
-    if not requested.startswith(safe_dir):
-        return abort(403)
-    if not os.path.exists(requested):
-        return abort(404)
-    return send_from_directory(CAPTURE_DIR, filename)
-
-
-@app.route("/_shutdown", methods=["POST"])
-def _shutdown():
-    require_auth()
-    camera.stop()
-    return "ok"
+app = create_app()
 
 
 if __name__ == "__main__":
