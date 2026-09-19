@@ -26,6 +26,9 @@ class FrameGrabberLatest:
         height: int | None = None,
         name: str = "sub",
         cap_factory=None,
+        stale_frame_threshold: int = 5,
+        reconnect_delay: float = 2.0,
+        max_reconnect_delay: float = 60.0,
     ):
         self.rtsp_url = rtsp_url
         self.width = width
@@ -38,6 +41,10 @@ class FrameGrabberLatest:
         self.lock = threading.Lock()
         self.ready = threading.Event()
         self._cap_factory = cap_factory or cv2.VideoCapture
+        self.stale_frame_threshold = max(1, int(stale_frame_threshold))
+        self.reconnect_delay = max(0.1, float(reconnect_delay))
+        self.max_reconnect_delay = max(self.reconnect_delay, float(max_reconnect_delay))
+        self.reconnect_count = 0
 
         self.thread = threading.Thread(target=self._capture_loop, daemon=True)
         self.thread.start()
@@ -60,6 +67,7 @@ class FrameGrabberLatest:
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
         is_opened = self.cap.isOpened()
+        self.reconnect_count += 1
         if is_opened:
             logger.info("[%s] Conexión RTSP exitosa", self.name)
         else:
@@ -67,20 +75,36 @@ class FrameGrabberLatest:
         return is_opened
 
     def _capture_loop(self) -> None:
-        reconnect_delay = 2.0
+        backoff = self.reconnect_delay
         first_frame_received = False
+        stale_reads = 0
 
         while not self.stopped:
             if (self.cap is None or not self.cap.isOpened()) and not self._open_stream():
-                time.sleep(reconnect_delay)
+                time.sleep(backoff)
+                backoff = min(backoff * 2, self.max_reconnect_delay)
                 continue
 
             ret, frame = self.cap.read()
             if not ret or frame is None:
                 self.ok = False
-                logger.warning("[%s] Frame inválido, reintentando...", self.name)
-                time.sleep(0.05)
+                stale_reads += 1
+                if stale_reads >= self.stale_frame_threshold:
+                    logger.warning(
+                        "[%s] Stream sin frames (%d intentos seguidos). Reconectando...",
+                        self.name,
+                        stale_reads,
+                    )
+                    self._open_stream()
+                    stale_reads = 0
+                    backoff = min(backoff * 2, self.max_reconnect_delay)
+                else:
+                    logger.debug("[%s] Frame inválido (%d), reintentando...", self.name, stale_reads)
+                    time.sleep(0.05)
                 continue
+
+            stale_reads = 0
+            backoff = self.reconnect_delay
 
             if frame.size == 0:
                 continue
@@ -134,6 +158,9 @@ class FrameGrabberBuffer:
         height: int | None = None,
         name: str = "main",
         cap_factory=None,
+        stale_frame_threshold: int = 5,
+        reconnect_delay: float = 2.0,
+        max_reconnect_delay: float = 60.0,
     ):
         self.rtsp_url = rtsp_url
         self.width = width
@@ -147,6 +174,10 @@ class FrameGrabberBuffer:
         self.lock = threading.Lock()
         self.ready = threading.Event()
         self._cap_factory = cap_factory or cv2.VideoCapture
+        self.stale_frame_threshold = max(1, int(stale_frame_threshold))
+        self.reconnect_delay = max(0.1, float(reconnect_delay))
+        self.max_reconnect_delay = max(self.reconnect_delay, float(max_reconnect_delay))
+        self.reconnect_count = 0
 
         self.thread = threading.Thread(target=self._capture_loop, daemon=True)
         self.thread.start()
@@ -169,6 +200,7 @@ class FrameGrabberBuffer:
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
         is_opened = self.cap.isOpened()
+        self.reconnect_count += 1
         if is_opened:
             logger.info("[%s] Conexión exitosa", self.name)
         else:
@@ -176,19 +208,36 @@ class FrameGrabberBuffer:
         return is_opened
 
     def _capture_loop(self) -> None:
-        reconnect_delay = 2.0
+        backoff = self.reconnect_delay
         first_frame_received = False
+        stale_reads = 0
 
         while not self.stopped:
             if (self.cap is None or not self.cap.isOpened()) and not self._open_stream():
-                time.sleep(reconnect_delay)
+                time.sleep(backoff)
+                backoff = min(backoff * 2, self.max_reconnect_delay)
                 continue
 
             ret, frame = self.cap.read()
             if not ret or frame is None or frame.size == 0:
                 self.ok = False
-                time.sleep(0.01)
+                stale_reads += 1
+                if stale_reads >= self.stale_frame_threshold:
+                    logger.warning(
+                        "[%s] Stream sin frames (%d intentos seguidos). Reconectando...",
+                        self.name,
+                        stale_reads,
+                    )
+                    self._open_stream()
+                    stale_reads = 0
+                    backoff = min(backoff * 2, self.max_reconnect_delay)
+                else:
+                    logger.debug("[%s] Frame inválido (%d), reintentando...", self.name, stale_reads)
+                    time.sleep(0.01)
                 continue
+
+            stale_reads = 0
+            backoff = self.reconnect_delay
 
             timestamp = time.time()
 
