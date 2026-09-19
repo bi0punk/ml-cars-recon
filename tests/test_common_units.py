@@ -219,6 +219,59 @@ class _FakeCap:
         self._frames.clear()
 
 
+class _FramesThenFailCap:
+    """Entrega ``frames`` y luego devuelve read()==False para siempre."""
+
+    def __init__(self, frames):
+        self._frames = list(frames)
+
+    def isOpened(self):
+        return True
+
+    def read(self):
+        if self._frames:
+            return True, self._frames.pop(0)
+        return False, None
+
+    def set(self, prop, value):
+        return True
+
+    def get(self, prop):
+        return 0
+
+    def release(self):
+        self._frames.clear()
+
+
+class _GlitchCap(_FakeCap):
+    """Como ``_FakeCap`` pero falla ``glitch`` lecturas seguidas y luego sigue."""
+
+    def __init__(self, frames, glitch):
+        super().__init__(frames)
+        self._glitch = glitch
+
+    def read(self):
+        if self._glitch > 0:
+            self._glitch -= 1
+            return False, None
+        return super().read()
+
+
+class _CountingFactory:
+    """Factory que cuenta cuántas veces se abre un nuevo capture."""
+
+    def __init__(self, make_cap):
+        self.calls = 0
+        self._make_cap = make_cap
+        self.caps = []
+
+    def __call__(self, *args, **kwargs):
+        self.calls += 1
+        cap = self._make_cap(self.calls)
+        self.caps.append(cap)
+        return cap
+
+
 class TestFrames:
     @staticmethod
     def make_frame(value):
@@ -264,5 +317,85 @@ class TestFrames:
             closest = grabber.get_closest_frame(time.time())
             assert closest is not None
             assert closest.shape == (32, 32, 3)
+        finally:
+            grabber.release()
+
+    def test_latest_reconnects_on_stale_stream(self):
+        factory = _CountingFactory(lambda n: _FramesThenFailCap([self.make_frame(10)] * 3))
+        grabber = FrameGrabberLatest(
+            "rtsp://fakep",
+            name="test-sub",
+            cap_factory=factory,
+            stale_frame_threshold=2,
+            reconnect_delay=0.01,
+            max_reconnect_delay=0.05,
+        )
+        try:
+            time.sleep(0.3)
+            assert factory.calls >= 2, "debería haber reabierto el stream al quedarse sin frames"
+            assert grabber.reconnect_count >= 2
+            ok, frame = grabber.read()
+            assert frame is not None
+            assert ok is False
+        finally:
+            grabber.release()
+
+    def test_latest_recovers_after_reconnect(self):
+        factory = _CountingFactory(
+            lambda n: _FramesThenFailCap([self.make_frame(10)] * 3) if n == 1 else _FakeCap([])
+        )
+        grabber = FrameGrabberLatest(
+            "rtsp://fakep",
+            name="test-sub",
+            cap_factory=factory,
+            stale_frame_threshold=2,
+            reconnect_delay=0.01,
+            max_reconnect_delay=0.05,
+        )
+        try:
+            time.sleep(0.3)
+            assert factory.calls >= 2, "la reconexión no ocurrió"
+            ok, frame = grabber.read()
+            assert ok is True
+            assert frame is not None
+        finally:
+            grabber.release()
+
+    def test_buffer_reconnects_and_fills_again(self):
+        factory = _CountingFactory(
+            lambda n: _FramesThenFailCap([self.make_frame(10)] * 3) if n == 1 else _FakeCap([])
+        )
+        grabber = FrameGrabberBuffer(
+            "rtsp://fakep",
+            name="test-main",
+            cap_factory=factory,
+            stale_frame_threshold=2,
+            reconnect_delay=0.01,
+            max_reconnect_delay=0.05,
+        )
+        try:
+            time.sleep(0.3)
+            assert factory.calls >= 2, "la reconexión no ocurrió"
+            info = grabber.get_buffer_info()
+            assert info["size"] > 0, "el buffer debería volver a llenarse tras reconectar"
+        finally:
+            grabber.release()
+
+    def test_stale_threshold_below_does_not_reopen(self):
+        factory = _CountingFactory(lambda n: _GlitchCap([self.make_frame(10)] * 20, glitch=2))
+        grabber = FrameGrabberLatest(
+            "rtsp://fakep",
+            name="test-sub",
+            cap_factory=factory,
+            stale_frame_threshold=5,
+            reconnect_delay=0.01,
+            max_reconnect_delay=0.05,
+        )
+        try:
+            time.sleep(0.3)
+            assert factory.calls == 1, "un glitch breve no debería forzar reconexión"
+            ok, frame = grabber.read()
+            assert ok is True
+            assert frame is not None
         finally:
             grabber.release()
