@@ -24,6 +24,7 @@ from typing import Any
 import cv2
 from flask import Flask, Response, abort, jsonify, render_template, request, send_from_directory
 
+from common.config import ISAPI_SNAPS_DIR
 from common.detector import VehicleDetector
 from common.frames import FrameGrabberLatest
 from common.geometry import compute_roi
@@ -38,7 +39,7 @@ class Config:
     """Configuración de la web app (una única fuente de variables)."""
 
     rtsp_url: str = ""
-    capture_dir: str = "isapi_snaps"
+    capture_dir: str = ISAPI_SNAPS_DIR
     latest_limit: int = 3
 
     model_path: str = "yolov8n.pt"

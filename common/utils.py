@@ -2,6 +2,7 @@
 
 import logging
 import os
+import uuid
 from datetime import datetime
 
 import cv2
@@ -45,10 +46,15 @@ def ensure_dir(path) -> None:
 
 
 def save_jpeg(frame, folder="captures", prefix="frame", quality=95) -> str:
-    """Guarda un frame como JPEG con calidad alta (útil para OCR)."""
+    """Guarda un frame como JPEG con calidad alta (útil para OCR).
+
+    Incluye un sufijo aleatorio corto para evitar colisiones de nombre cuando
+    dos capturas ocurren en el mismo milisegundo.
+    """
     ensure_dir(folder)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")
-    path = os.path.join(folder, f"{timestamp}_{prefix}.jpg")
+    token = uuid.uuid4().hex[:6]
+    path = os.path.join(folder, f"{timestamp}_{token}_{prefix}.jpg")
     cv2.imwrite(path, frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
     logger.info("Imagen guardada: %s", path)
     return path

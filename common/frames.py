@@ -31,6 +31,7 @@ class FrameGrabberLatest:
         stale_frame_threshold: int = 5,
         reconnect_delay: float = 2.0,
         max_reconnect_delay: float = 60.0,
+        ready_timeout: float = 10.0,
     ):
         self.rtsp_url = rtsp_url
         self.width = width
@@ -52,7 +53,7 @@ class FrameGrabberLatest:
         self.thread.start()
 
         logger.info("[%s] Esperando conexión RTSP...", self.name)
-        if self.ready.wait(timeout=10):
+        if self.ready.wait(timeout=ready_timeout):
             logger.info("[%s] FrameGrabberLatest iniciado correctamente", self.name)
         else:
             logger.warning("[%s] Timeout esperando primer frame", self.name)
@@ -167,6 +168,7 @@ class FrameGrabberBuffer:
         stale_frame_threshold: int = 5,
         reconnect_delay: float = 2.0,
         max_reconnect_delay: float = 60.0,
+        ready_timeout: float = 10.0,
     ):
         self.rtsp_url = rtsp_url
         self.width = width
@@ -189,7 +191,7 @@ class FrameGrabberBuffer:
         self.thread.start()
 
         logger.info("[%s] Esperando conexión...", self.name)
-        if self.ready.wait(timeout=10):
+        if self.ready.wait(timeout=ready_timeout):
             logger.info("[%s] Buffer iniciado (size=%s)", self.name, self.max_buffer_size)
         else:
             logger.warning("[%s] Timeout esperando conexión", self.name)

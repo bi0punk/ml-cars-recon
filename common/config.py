@@ -7,6 +7,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Directorios de captura (runtime, excluidos de git)
+ISAPI_SNAPS_DIR = "isapi_snaps"
+CAPTURES_PREROLL_DIR = "captures_preroll"
+CAPTURES_FALLBACK_DIR = "captures_fallback"
+
 
 def env_value(*names: str, default: str = "") -> str:
     """Return the first non-empty environment variable among ``names``."""

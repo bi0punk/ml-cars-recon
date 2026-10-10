@@ -9,6 +9,9 @@ from requests.auth import HTTPDigestAuth
 
 logger = logging.getLogger(__name__)
 
+# Sesión reutilizada para snapshots (mantiene conexiones/keep-alive).
+_session = requests.Session()
+
 
 def snapshot_url(host: str, channel: str = "101") -> str:
     return f"http://{host}/ISAPI/Streaming/channels/{channel}/picture"
@@ -28,7 +31,7 @@ def save_isapi_snapshot(
     """
     try:
         os.makedirs(folder, exist_ok=True)
-        response = requests.get(
+        response = _session.get(
             snapshot_url(host, channel),
             auth=HTTPDigestAuth(user, password),
             timeout=timeout,

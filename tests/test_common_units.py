@@ -175,7 +175,7 @@ class TestIsapi:
                 yield b"def"
 
         responses = deque([_Resp()])
-        monkeypatch.setattr(isapi_mod.requests, "get", lambda *a, **k: responses.popleft())
+        monkeypatch.setattr(isapi_mod._session, "get", lambda *a, **k: responses.popleft())
 
         path = isapi_mod.save_isapi_snapshot(
             "192.168.1.64", "admin", "pass", folder=str(tmp_path), channel="101"
@@ -193,7 +193,7 @@ class TestIsapi:
             def iter_content(self, chunk_size):
                 yield b""
 
-        monkeypatch.setattr(isapi_mod.requests, "get", lambda *a, **k: _Resp())
+        monkeypatch.setattr(isapi_mod._session, "get", lambda *a, **k: _Resp())
         assert (
             isapi_mod.save_isapi_snapshot("192.168.1.64", "admin", "pass", folder=str(tmp_path))
             is None
@@ -206,7 +206,7 @@ class TestIsapi:
         def _boom(**kwargs):
             raise isapi_mod.requests.exceptions.Timeout()
 
-        monkeypatch.setattr(isapi_mod.requests, "get", _boom)
+        monkeypatch.setattr(isapi_mod._session, "get", _boom)
         assert (
             isapi_mod.save_isapi_snapshot("192.168.1.64", "admin", "pass", folder=str(tmp_path))
             is None

@@ -29,6 +29,7 @@ import numpy as np
 from ultralytics import YOLO
 
 from common import cli
+from common.config import CAPTURES_PREROLL_DIR, ISAPI_SNAPS_DIR
 from common.detector import BoxFilter, VehicleDetector
 from common.frames import FrameGrabberBuffer, FrameGrabberLatest, best_frame
 from common.geometry import draw_polygon, parse_polygon, point_inside_polygon
@@ -44,7 +45,7 @@ WINDOW = "Live (YOLOv8 LPR pre-roll)"
 class CaptureSettings:
     """Ajustes de captura de pre-roll (independientes del CLI)."""
 
-    save_dir: str = "captures_preroll"
+    save_dir: str = CAPTURES_PREROLL_DIR
     pre_roll_ms: int = 300
     sharp_window_ms: int = 200
     sharp_min_frames: int = 1
@@ -97,7 +98,7 @@ def async_capture(
             camera.host,
             camera.user,
             camera.password,
-            folder="isapi_snaps",
+            folder=ISAPI_SNAPS_DIR,
             channel=camera.snapshot_channel,
             timeout=4,
         )

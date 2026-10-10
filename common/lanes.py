@@ -7,15 +7,25 @@ import numpy as np
 class LaneDetector:
     """Detector de carriles usando Canny + Hough Transform."""
 
-    def __init__(self, roi_vertices: np.ndarray | None = None):
+    def __init__(
+        self,
+        roi_vertices: np.ndarray | None = None,
+        canny_low: int = 50,
+        canny_high: int = 150,
+        hough_rho: int = 2,
+        hough_theta: float | None = None,
+        hough_threshold: int = 50,
+        min_line_length: int = 40,
+        max_line_gap: int = 100,
+    ):
         self.roi_vertices = roi_vertices
-        self.canny_low = 50
-        self.canny_high = 150
-        self.hough_rho = 2
-        self.hough_theta = np.pi / 180
-        self.hough_threshold = 50
-        self.hough_min_line_len = 40
-        self.hough_max_line_gap = 100
+        self.canny_low = canny_low
+        self.canny_high = canny_high
+        self.hough_rho = hough_rho
+        self.hough_theta = hough_theta if hough_theta is not None else np.pi / 180
+        self.hough_threshold = hough_threshold
+        self.hough_min_line_len = min_line_length
+        self.hough_max_line_gap = max_line_gap
 
     def _roi_mask(self, img: np.ndarray, vertices: np.ndarray) -> np.ndarray:
         """Aplica máscara de ROI."""

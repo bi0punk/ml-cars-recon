@@ -22,6 +22,7 @@ import numpy as np
 from ultralytics import YOLO
 
 from common import cli
+from common.config import ISAPI_SNAPS_DIR
 from common.detector import VehicleDetector
 from common.frames import FrameGrabberLatest
 from common.geometry import compute_roi
@@ -117,7 +118,7 @@ def main() -> int:
                     camera.user,
                     camera.password,
                     camera.snapshot_channel,
-                    folder="isapi_snaps",
+                    folder=ISAPI_SNAPS_DIR,
                     timeout=4,
                 )
 

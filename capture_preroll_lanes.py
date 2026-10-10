@@ -23,6 +23,7 @@ import numpy as np
 from ultralytics import YOLO
 
 from common import cli
+from common.config import CAPTURES_FALLBACK_DIR, CAPTURES_PREROLL_DIR
 from common.detector import VehicleDetector
 from common.frames import FrameGrabberBuffer, FrameGrabberLatest
 from common.geometry import compute_roi
@@ -92,13 +93,13 @@ class PreRollLanesSystem:
         target_ts = time.time() - (self.detection.pre_roll_ms / 1000.0)
         frame = self.grab_main.get_closest_frame(target_ts)
         if frame is not None:
-            save_jpeg(frame, folder="captures_preroll", prefix="main")
+            save_jpeg(frame, folder=CAPTURES_PREROLL_DIR, prefix="main")
             self.stats["captures"] += 1
         else:
             logger.warning("Buffer MAIN vacío; usando sub-stream como fallback")
             ok, fallback = self.grab_sub.read()
             if ok and fallback is not None:
-                save_jpeg(fallback, folder="captures_fallback", prefix="sub")
+                save_jpeg(fallback, folder=CAPTURES_FALLBACK_DIR, prefix="sub")
 
     def _maybe_capture(self, trigger_capture: bool) -> bool:
         """Dispara la captura pre-roll SOLO si un vehículo está completo dentro
