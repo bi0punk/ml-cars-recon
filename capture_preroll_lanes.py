@@ -81,6 +81,7 @@ class PreRollLanesSystem:
             "captures": 0,
             "start_time": time.time(),
         }
+        self._last_capture_ts = 0.0
         logger.info("Sistema inicializado correctamente")
 
     def _roi(self, w: int, h: int) -> tuple[int, int, int, int]:
@@ -104,6 +105,16 @@ class PreRollLanesSystem:
             ok, fallback = self.grab_sub.read()
             if ok and fallback is not None:
                 save_jpeg(fallback, folder="captures_fallback", prefix="sub")
+
+    def _maybe_capture(self, trigger_capture: bool) -> bool:
+        """Dispara la captura pre-roll SOLO si un vehículo está completo dentro
+        del ROI y respeta el cooldown. Retorna ``True`` si se disparó."""
+        now = time.time()
+        if trigger_capture and (now - self._last_capture_ts) > self.detection.cooldown:
+            self._last_capture_ts = now
+            threading.Thread(target=self._capture_preroll, daemon=True).start()
+            return True
+        return False
 
     def _draw_info_panel(self, frame, detected: bool, fps: float, buffer_info: dict) -> None:
         height, width = frame.shape[:2]
@@ -134,7 +145,6 @@ class PreRollLanesSystem:
         fps_counter = 0
         fps_start = time.time()
         current_fps = 0.0
-        last_capture_ts = 0.0
 
         logger.info("Sistema iniciado. Presiona 'q' para salir.")
         try:
@@ -162,7 +172,7 @@ class PreRollLanesSystem:
                 roi = self._roi(W, H)
                 cv2.rectangle(frame, (roi[0], roi[1]), (roi[2], roi[3]), (255, 255, 0), 2)
 
-                frame, detected, _ = self.detector.detect(frame, roi)
+                frame, detected, trigger_capture = self.detector.detect(frame, roi)
                 if detected:
                     self.stats["detections"] += 1
 
@@ -173,10 +183,7 @@ class PreRollLanesSystem:
                     except Exception as exc:
                         logger.error("Error en detección de carriles: %s", exc)
 
-                now = time.time()
-                if (now - last_capture_ts) > self.detection.cooldown:
-                    last_capture_ts = now
-                    threading.Thread(target=self._capture_preroll, daemon=True).start()
+                self._maybe_capture(trigger_capture)
 
                 fps_counter += 1
                 if fps_counter >= 30:
