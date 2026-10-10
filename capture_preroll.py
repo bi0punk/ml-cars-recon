@@ -17,6 +17,7 @@ Uso:
 """
 
 import argparse
+import logging
 import os
 import sys
 import threading
@@ -32,8 +33,9 @@ from common.frames import FrameGrabberBuffer, FrameGrabberLatest, best_frame
 from common.geometry import draw_polygon, parse_polygon, point_inside_polygon
 from common.isapi import save_isapi_snapshot
 from common.rtsp import build_isapi_url
-from common.utils import StableTrigger, save_jpeg, set_ffmpeg_low_latency_env
+from common.utils import StableTrigger, save_jpeg, set_ffmpeg_low_latency_env, setup_logging
 
+logger = logging.getLogger(__name__)
 WINDOW = "Live (YOLOv8 LPR pre-roll)"
 
 
@@ -77,7 +79,7 @@ def async_capture(
         save_jpeg(best, folder=args.save_dir, prefix="preroll_best")
         return
     if args.fallback_isapi:
-        print("[WARN] Buffer MAIN sin frames suficientes. Fallback ISAPI...")
+        logger.warning("Buffer MAIN sin frames suficientes. Fallback ISAPI...")
         save_isapi_snapshot(
             camera.host,
             camera.user,
@@ -87,7 +89,7 @@ def async_capture(
             timeout=4,
         )
     else:
-        print("[WARN] Buffer MAIN sin frames suficientes.")
+        logger.warning("Buffer MAIN sin frames suficientes.")
 
 
 def main() -> int:
@@ -117,7 +119,9 @@ def main() -> int:
         "--road-poly", default="", dest="road_poly", help='Polígono "x,y;x,y;..." (fracciones)'
     )
     pr.add_argument("--filter-to-road", action="store_true", dest="filter_to_road")
+    cli.add_verbosity_flag(parser)
     args = parser.parse_args()
+    setup_logging(args.verbose)
 
     if args.filter_to_road and not args.road_poly:
         parser.error("--filter-to-road requiere --road-poly")
@@ -127,15 +131,15 @@ def main() -> int:
     roi_config = cli.roi_config_from_args(args)
 
     if not camera.password:
-        print("[ERROR] Define RTSP_PASSWORD en .env o pasa --password")
+        logger.error("Define RTSP_PASSWORD en .env o pasa --password")
         return 1
     if not os.path.exists(detection.model_path):
-        print(f"[ERROR] Modelo no encontrado: {detection.model_path}")
+        logger.error("Modelo no encontrado: %s", detection.model_path)
         return 1
 
     set_ffmpeg_low_latency_env(camera.rtsp_transport)
 
-    print(f"[INFO] Cargando modelo: {detection.model_path}")
+    logger.info("Cargando modelo: %s", detection.model_path)
     model = YOLO(detection.model_path)
 
     sub_url = build_isapi_url(camera.host, camera.user, camera.password, camera.rtsp_channel)
@@ -165,7 +169,7 @@ def main() -> int:
     stable = StableTrigger(stable_frames=args.stable_frames, rearm_frames=args.rearm_frames)
     last_capture_ts = 0.0
 
-    print("[INFO] Transmisión iniciada. Presiona 'q' para salir.")
+    logger.info("Transmisión iniciada. Presiona 'q' para salir.")
     try:
         while True:
             ok, frame = grab_sub.read()
@@ -226,12 +230,12 @@ def main() -> int:
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
     except KeyboardInterrupt:
-        print("\n[INFO] Interrupción por usuario (Ctrl+C)")
+        logger.info("Interrupción por usuario (Ctrl+C)")
     finally:
         grab_sub.release()
         grab_main.release()
         cv2.destroyAllWindows()
-        print("[INFO] Transmisión finalizada correctamente.")
+        logger.info("Transmisión finalizada correctamente.")
     return 0
 
 

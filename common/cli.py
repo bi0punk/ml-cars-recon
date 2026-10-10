@@ -70,6 +70,10 @@ def add_roi_arguments(parser: argparse.ArgumentParser) -> None:
     group.add_argument("--roi-center-y-ratio", type=float, default=0.40, dest="roi_center_y_ratio")
 
 
+def add_verbosity_flag(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--verbose", action="store_true", help="Loguear a nivel DEBUG")
+
+
 def camera_config_from_args(args: argparse.Namespace) -> CameraConfig:
     return CameraConfig(
         host=args.host or env_value("RTSP_HOST", default="192.168.1.64"),

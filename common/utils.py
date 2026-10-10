@@ -29,6 +29,16 @@ def set_ffmpeg_low_latency_env(transport: str = "udp") -> str:
     return options
 
 
+def setup_logging(verbose: bool = False) -> None:
+    """Configura logging de la app. ``verbose=True`` sube a nivel DEBUG."""
+    level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+
 def ensure_dir(path) -> None:
     """Crea el directorio (y padres) si no existe."""
     os.makedirs(path, exist_ok=True)

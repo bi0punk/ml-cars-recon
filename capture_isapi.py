@@ -12,6 +12,7 @@ Uso:
 """
 
 import argparse
+import logging
 import os
 import sys
 import time
@@ -25,8 +26,9 @@ from common.detector import VehicleDetector
 from common.frames import FrameGrabberLatest
 from common.geometry import compute_roi
 from common.rtsp import build_isapi_channel_url, build_isapi_url
-from common.utils import set_ffmpeg_low_latency_env
+from common.utils import set_ffmpeg_low_latency_env, setup_logging
 
+logger = logging.getLogger(__name__)
 WINDOW = "RTSP Live (YOLOv8 - ISAPI)"
 
 
@@ -38,29 +40,31 @@ def main() -> int:
     cli.add_camera_arguments(parser)
     cli.add_detection_arguments(parser)
     cli.add_roi_arguments(parser)
+    cli.add_verbosity_flag(parser)
     args = parser.parse_args()
+    setup_logging(args.verbose)
 
     camera = cli.camera_config_from_args(args)
     detection = cli.detection_config_from_args(args)
     roi_config = cli.roi_config_from_args(args)
 
     if not camera.password:
-        print("[ERROR] Define RTSP_PASSWORD en .env o pasa --password")
+        logger.error("Define RTSP_PASSWORD en .env o pasa --password")
         return 1
     if not os.path.exists(detection.model_path):
-        print(f"[ERROR] Modelo no encontrado: {detection.model_path}")
+        logger.error("Modelo no encontrado: %s", detection.model_path)
         return 1
 
     set_ffmpeg_low_latency_env(camera.rtsp_transport)
 
-    print(f"[INFO] Cargando modelo: {detection.model_path}")
+    logger.info("Cargando modelo: %s", detection.model_path)
     model = YOLO(detection.model_path)
 
     builder = build_isapi_channel_url if args.substream_suffix else build_isapi_url
     rtsp_url = builder(camera.host, camera.user, camera.password, camera.rtsp_channel)
 
-    print(
-        f"[INFO] Conectando RTSP canal {camera.rtsp_channel}: user={camera.user}, host={camera.host}"
+    logger.info(
+        "Conectando RTSP canal %s: user=%s, host=%s", camera.rtsp_channel, camera.user, camera.host
     )
     grab = FrameGrabberLatest(rtsp_url, width=camera.width, height=camera.height, name="sub")
     detector = VehicleDetector(
@@ -73,7 +77,7 @@ def main() -> int:
         infer_every_n=detection.infer_every_n,
     )
 
-    print("[INFO] Transmisión iniciada. Presiona 'q' para salir.")
+    logger.info("Transmisión iniciada. Presiona 'q' para salir.")
 
     try:
         while True:
@@ -126,11 +130,11 @@ def main() -> int:
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
     except KeyboardInterrupt:
-        print("\n[INFO] Interrupción por usuario (Ctrl+C)")
+        logger.info("Interrupción por usuario (Ctrl+C)")
     finally:
         grab.release()
         cv2.destroyAllWindows()
-        print("[INFO] Transmisión finalizada correctamente.")
+        logger.info("Transmisión finalizada correctamente.")
     return 0
 
 

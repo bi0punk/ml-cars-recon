@@ -28,13 +28,8 @@ from common.frames import FrameGrabberBuffer, FrameGrabberLatest
 from common.geometry import compute_roi
 from common.lanes import LaneDetector
 from common.rtsp import build_isapi_url
-from common.utils import save_jpeg, set_ffmpeg_low_latency_env
+from common.utils import save_jpeg, set_ffmpeg_low_latency_env, setup_logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
 logger = logging.getLogger(__name__)
 
 
@@ -238,11 +233,9 @@ def main() -> int:
     parser.add_argument(
         "--disable-lane-detection", action="store_true", dest="disable_lane_detection"
     )
-    parser.add_argument("--verbose", action="store_true", help="Log nivel DEBUG")
+    cli.add_verbosity_flag(parser)
     args = parser.parse_args()
-
-    if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
+    setup_logging(args.verbose)
 
     camera = cli.camera_config_from_args(args)
     detection = cli.detection_config_from_args(args)
