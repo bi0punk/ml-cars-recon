@@ -6,6 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "ml-cars-recon"
 version = "1.0.0"
 description = "Detección de vehículos y captura de patentes desde RTSP con YOLO"
+readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.11"
 dependencies = [
     "opencv-python>=4.8.0",
@@ -19,12 +21,32 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
     "ruff>=0.6.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/bi0punk/ml-cars-recon"
+Issues = "https://github.com/bi0punk/ml-cars-recon/issues"
+
+[project.scripts]
+capture-isapi = "capture_isapi:main"
+capture-preroll = "capture_preroll:main"
+capture-preroll-lanes = "capture_preroll_lanes:main"
+
+[tool.setuptools]
+py-modules = ["capture_isapi", "capture_preroll", "capture_preroll_lanes"]
+
+[tool.setuptools.packages.find]
+include = ["common*", "web_app*"]
+
+[tool.setuptools.package-data]
+web_app = ["templates/*.html", "static/*.js", "static/css/*.css"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = "--cov=common --cov=web_app --cov-report=term-missing"
 
 [tool.ruff]
 line-length = 100

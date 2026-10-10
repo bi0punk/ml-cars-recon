@@ -10,6 +10,12 @@ env/
 .ruff_cache/
 .mypy_cache/
 
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
 # ML models (large binaries)
 *.pt
 *.h5
