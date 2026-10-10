@@ -14,6 +14,7 @@ de variables de entorno; en tests se puede sustituir por
 from __future__ import annotations
 
 import glob
+import hmac
 import logging
 import os
 import threading
@@ -122,9 +123,18 @@ def _get_model():
 def require_auth():
     if not CONFIG.api_token:
         return
-    token = request.headers.get("X-API-Token")
-    if not token or token != CONFIG.api_token:
+    token = request.headers.get("X-API-Token") or ""
+    if not hmac.compare_digest(token, CONFIG.api_token):
         abort(401, description="Unauthorized")
+
+
+def _origin_allowed() -> bool:
+    """Bloquea peticiones cross-origin (CSRF) a rutas de estado."""
+
+    origin = request.headers.get("Origin")
+    if not origin:
+        return True
+    return origin.rstrip("/") == request.host_url.rstrip("/")
 
 
 def list_latest_images(limit: int | None = None) -> list[str]:
@@ -332,6 +342,8 @@ def create_app() -> Flask:
     @app.route("/_shutdown", methods=["POST"])
     def shutdown():
         require_auth()
+        if not _origin_allowed():
+            abort(403, description="Forbidden cross-origin")
         reset_camera()
         return "ok"
 

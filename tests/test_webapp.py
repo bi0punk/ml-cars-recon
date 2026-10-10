@@ -65,3 +65,28 @@ class TestWebApp:
         resp = client.get("/api/status", headers={"X-API-Token": "sekret"})
         assert resp.status_code == 200
         assert resp.get_json() == {"active": False}
+
+    # --- Seguridad ---
+    def test_shutdown_blocked_cross_origin(self, monkeypatch):
+        monkeypatch.setattr(web_app, "CONFIG", web_app.Config(api_token="sekret"))
+        client = web_app.app.test_client()
+        resp = client.post(
+            "/_shutdown",
+            headers={"X-API-Token": "sekret", "Origin": "https://attacker.example"},
+        )
+        assert resp.status_code == 403
+        assert web_app._camera is None
+
+    def test_shutdown_allowed_same_origin(self, monkeypatch):
+        monkeypatch.setattr(web_app, "CONFIG", web_app.Config(api_token="sekret"))
+        client = web_app.app.test_client()
+        resp = client.post(
+            "/_shutdown",
+            headers={"X-API-Token": "sekret", "Origin": "http://localhost"},
+        )
+        assert resp.status_code == 200
+
+    def test_wrong_token_rejected(self, monkeypatch):
+        monkeypatch.setattr(web_app, "CONFIG", web_app.Config(api_token="sekret"))
+        client = web_app.app.test_client()
+        assert client.get("/api/status", headers={"X-API-Token": "nope"}).status_code == 401
