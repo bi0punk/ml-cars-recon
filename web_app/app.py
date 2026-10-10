@@ -5,13 +5,21 @@
 Sin efectos colaterales al importar: la cámara y el modelo YOLO se crean de
 forma perezosa (``get_camera`` / ``_get_model``), por lo que importar este
 módulo no arranca hilos de captura ni carga modelos pesados.
+
+La configuración se resuelve una vez en ``CONFIG`` (``load_config``) a partir
+de variables de entorno; en tests se puede sustituir por
+``Config(...)``/``dataclasses.replace``.
 """
+
+from __future__ import annotations
 
 import glob
 import logging
 import os
 import threading
 import time
+from dataclasses import dataclass
+from typing import Any
 
 import cv2
 from flask import Flask, Response, abort, jsonify, render_template, request, send_from_directory
@@ -25,33 +33,71 @@ from common.utils import set_ffmpeg_low_latency_env
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
 class Config:
     """Configuración de la web app (una única fuente de variables)."""
 
-    rtsp_url = os.getenv("RTSP_URL", "")
-    capture_dir = os.getenv("CAPTURE_DIR", "isapi_snaps")
-    latest_limit = int(os.getenv("LATEST_LIMIT", "3"))
+    rtsp_url: str = ""
+    capture_dir: str = "isapi_snaps"
+    latest_limit: int = 3
 
-    model_path = os.getenv("MODEL_PATH", "yolov8n.pt")
-    yolo_conf = float(os.getenv("YOLO_CONF", "0.45"))
-    infer_every_n = max(1, int(os.getenv("INFER_EVERY_N", "2")))
-    imgsz = int(os.getenv("IMG_SIZE", "640"))
+    model_path: str = "yolov8n.pt"
+    yolo_conf: float = 0.45
+    infer_every_n: int = 2
+    imgsz: int = 640
 
-    roi_w_pct = float(os.getenv("ROI_W_PCT", "0.60"))
-    roi_h_pct = float(os.getenv("ROI_H_PCT", "0.50"))
-    roi_cy_pct = float(os.getenv("ROI_CY_PCT", "0.45"))
+    roi_w_pct: float = 0.60
+    roi_h_pct: float = 0.50
+    roi_cy_pct: float = 0.45
 
-    isapi_host = os.getenv("ISAPI_HOST", "192.168.1.64")
-    isapi_user = os.getenv("ISAPI_USER", "admin")
-    isapi_password = os.getenv("ISAPI_PASSWORD", "")
-    snapshot_channel = os.getenv("SNAPSHOT_CHANNEL", "101")
-    snapshot_cooldown = float(os.getenv("SNAPSHOT_COOLDOWN", "1.0"))
+    isapi_host: str = "192.168.1.64"
+    isapi_user: str = "admin"
+    isapi_password: str = ""
+    snapshot_channel: str = "101"
+    snapshot_cooldown: float = 1.0
 
-    api_token = os.getenv("API_TOKEN", "")
+    api_token: str = ""
 
 
-_camera = None
-_model = None
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def load_config() -> Config:
+    return Config(
+        rtsp_url=os.getenv("RTSP_URL", ""),
+        capture_dir=os.getenv("CAPTURE_DIR", "isapi_snaps"),
+        latest_limit=_env_int("LATEST_LIMIT", 3),
+        model_path=os.getenv("MODEL_PATH", "yolov8n.pt"),
+        yolo_conf=_env_float("YOLO_CONF", 0.45),
+        infer_every_n=max(1, _env_int("INFER_EVERY_N", 2)),
+        imgsz=_env_int("IMG_SIZE", 640),
+        roi_w_pct=_env_float("ROI_W_PCT", 0.60),
+        roi_h_pct=_env_float("ROI_H_PCT", 0.50),
+        roi_cy_pct=_env_float("ROI_CY_PCT", 0.45),
+        isapi_host=os.getenv("ISAPI_HOST", "192.168.1.64"),
+        isapi_user=os.getenv("ISAPI_USER", "admin"),
+        isapi_password=os.getenv("ISAPI_PASSWORD", ""),
+        snapshot_channel=os.getenv("SNAPSHOT_CHANNEL", "101"),
+        snapshot_cooldown=_env_float("SNAPSHOT_COOLDOWN", 1.0),
+        api_token=os.getenv("API_TOKEN", ""),
+    )
+
+
+CONFIG = load_config()
+
+_camera: DetectorCamera | None = None
+_model: Any | None = None
 _model_lock = threading.Lock()
 
 
@@ -64,8 +110,8 @@ def _get_model():
                 try:
                     from ultralytics import YOLO
 
-                    _model = YOLO(Config.model_path)
-                    logger.info("Modelo YOLO cargado: %s", Config.model_path)
+                    _model = YOLO(CONFIG.model_path)
+                    logger.info("Modelo YOLO cargado: %s", CONFIG.model_path)
                 except Exception as exc:
                     _model = None
                     logger.error("Error al cargar modelo YOLO: %s", exc)
@@ -73,16 +119,16 @@ def _get_model():
 
 
 def require_auth():
-    if not Config.api_token:
+    if not CONFIG.api_token:
         return
     token = request.headers.get("X-API-Token")
-    if not token or token != Config.api_token:
+    if not token or token != CONFIG.api_token:
         abort(401, description="Unauthorized")
 
 
 def list_latest_images(limit: int | None = None) -> list[str]:
-    limit = Config.latest_limit if limit is None else max(0, int(limit))
-    files = glob.glob(os.path.join(Config.capture_dir, "*.jpg"))
+    limit = CONFIG.latest_limit if limit is None else max(0, int(limit))
+    files = glob.glob(os.path.join(CONFIG.capture_dir, "*.jpg"))
     files.sort(key=os.path.getmtime, reverse=True)
     return [os.path.basename(p) for p in files[:limit]]
 
@@ -90,11 +136,11 @@ def list_latest_images(limit: int | None = None) -> list[str]:
 def save_isapi_snapshot(folder: str | None = None, timeout: int = 3) -> str | None:
     """Descarga snapshot vía ISAPI con Digest (usa la config del módulo)."""
     return _save_isapi_snapshot(
-        Config.isapi_host,
-        Config.isapi_user,
-        Config.isapi_password,
-        folder=folder or Config.capture_dir,
-        channel=Config.snapshot_channel,
+        CONFIG.isapi_host,
+        CONFIG.isapi_user,
+        CONFIG.isapi_password,
+        folder=folder or CONFIG.capture_dir,
+        channel=CONFIG.snapshot_channel,
         timeout=timeout,
     )
 
@@ -112,10 +158,10 @@ class DetectorCamera:
         self.model = model
         self.detector = VehicleDetector(
             model,
-            conf=Config.yolo_conf,
-            snapshot_cooldown=Config.snapshot_cooldown,
-            imgsz=Config.imgsz,
-            infer_every_n=Config.infer_every_n,
+            conf=CONFIG.yolo_conf,
+            snapshot_cooldown=CONFIG.snapshot_cooldown,
+            imgsz=CONFIG.imgsz,
+            infer_every_n=CONFIG.infer_every_n,
         )
         self.grabber = FrameGrabberLatest(src, name="web")
         self.frame = None
@@ -141,7 +187,11 @@ class DetectorCamera:
             draw = frame.copy()
             H, W = draw.shape[:2]
             roi_rect = compute_roi(
-                W, H, roi_w=Config.roi_w_pct, roi_h=Config.roi_h_pct, roi_cy=Config.roi_cy_pct
+                W,
+                H,
+                roi_w=CONFIG.roi_w_pct,
+                roi_h=CONFIG.roi_h_pct,
+                roi_cy=CONFIG.roi_cy_pct,
             )
             x0, y0, x1, y1 = roi_rect
             cx = W // 2
@@ -168,9 +218,9 @@ class DetectorCamera:
                 1,
             )
 
-            if trigger_snapshot and Config.isapi_password:
+            if trigger_snapshot and CONFIG.isapi_password:
                 now = time.time()
-                if (now - self.last_snap_ts) > Config.snapshot_cooldown:
+                if (now - self.last_snap_ts) > CONFIG.snapshot_cooldown:
                     self.last_snap_ts = now
                     self.stats["captures"] += 1
                     threading.Thread(target=save_isapi_snapshot, daemon=True).start()
@@ -215,7 +265,7 @@ def get_camera() -> DetectorCamera:
     """Crea (y cachea) la cámara de forma perezosa."""
     global _camera
     if _camera is None:
-        _camera = DetectorCamera(Config.rtsp_url, _get_model())
+        _camera = DetectorCamera(CONFIG.rtsp_url, _get_model())
     return _camera
 
 
@@ -270,13 +320,13 @@ def create_app() -> Flask:
 
     @app.route("/captures/<path:filename>")
     def captures(filename):
-        safe_dir = os.path.abspath(Config.capture_dir)
-        requested = os.path.abspath(os.path.join(Config.capture_dir, filename))
+        safe_dir = os.path.abspath(CONFIG.capture_dir)
+        requested = os.path.abspath(os.path.join(CONFIG.capture_dir, filename))
         if not requested.startswith(safe_dir):
             return abort(403)
         if not os.path.exists(requested):
             return abort(404)
-        return send_from_directory(Config.capture_dir, filename)
+        return send_from_directory(CONFIG.capture_dir, filename)
 
     @app.route("/_shutdown", methods=["POST"])
     def shutdown():
