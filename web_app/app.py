@@ -113,7 +113,7 @@ class DetectorCamera:
         self.detector = VehicleDetector(
             model,
             conf=Config.yolo_conf,
-            cooldown=Config.snapshot_cooldown,
+            snapshot_cooldown=Config.snapshot_cooldown,
             imgsz=Config.imgsz,
             infer_every_n=Config.infer_every_n,
         )

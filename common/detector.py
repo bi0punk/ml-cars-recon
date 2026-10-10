@@ -42,7 +42,7 @@ class VehicleDetector:
         model,
         conf: float = 0.45,
         iou: float = 0.5,
-        cooldown: float = 1.0,
+        snapshot_cooldown: float = 1.0,
         vehicle_classes=None,
         device: str | None = None,
         imgsz: int | None = None,
@@ -53,7 +53,7 @@ class VehicleDetector:
         self.model = model
         self.conf = conf
         self.iou = iou
-        self.cooldown = max(0.0, cooldown)
+        self.snapshot_cooldown = max(0.0, snapshot_cooldown)
         self.vehicle_classes = list(vehicle_classes) if vehicle_classes else VEHICLE_CLASSES
         self.device = device
         self.imgsz = imgsz
@@ -171,7 +171,7 @@ class VehicleDetector:
         cooldown.
         """
         now = time.time()
-        if (now - self.last_capture_ts) < self.cooldown:
+        if (now - self.last_capture_ts) < self.snapshot_cooldown:
             return False
         self.last_capture_ts = now
         threading.Thread(

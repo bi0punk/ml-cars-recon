@@ -479,7 +479,7 @@ class TestVehicleDetector:
         import common.detector as detector_mod
 
         monkeypatch.setattr(detector_mod, "save_isapi_snapshot", lambda *a, **k: None)
-        det = VehicleDetector(_FakeYolo([]), cooldown=60.0)
+        det = VehicleDetector(_FakeYolo([]), snapshot_cooldown=60.0)
         assert det.trigger_if_ready("h", "u", "p", "101") is True
         assert det.trigger_if_ready("h", "u", "p", "101") is False
 
@@ -487,7 +487,7 @@ class TestVehicleDetector:
         import common.detector as detector_mod
 
         monkeypatch.setattr(detector_mod, "save_isapi_snapshot", lambda *a, **k: None)
-        det = VehicleDetector(_FakeYolo([]), cooldown=0.0)
+        det = VehicleDetector(_FakeYolo([]), snapshot_cooldown=0.0)
         assert det.trigger_if_ready("h", "u", "p", "101") is True
         assert det.trigger_if_ready("h", "u", "p", "101") is True
 

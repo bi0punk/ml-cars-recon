@@ -47,7 +47,16 @@ def add_detection_arguments(parser: argparse.ArgumentParser) -> None:
     group.add_argument("--model", default=None, help="Modelo YOLO (.pt) (o env YOLO_MODEL)")
     group.add_argument("--conf", type=float, default=0.45, help="Confianza mínima YOLO")
     group.add_argument("--iou", type=float, default=0.5, help="Umbral IoU")
-    group.add_argument("--cooldown", type=float, default=0.8, help="Segundos entre capturas")
+    group.add_argument(
+        "--cooldown", type=float, default=0.8, help="Segundos entre capturas de pre-roll"
+    )
+    group.add_argument(
+        "--snapshot-cooldown",
+        type=float,
+        default=1.0,
+        dest="snapshot_cooldown",
+        help="Segundos entre snapshots ISAPI",
+    )
     group.add_argument(
         "--imgsz", type=int, default=None, help="Tamaño de entrada YOLO (por defecto el del modelo)"
     )
@@ -109,7 +118,8 @@ def detection_config_from_args(args: argparse.Namespace) -> DetectionConfig:
         model_path=args.model or env_value("YOLO_MODEL", default="yolov8n.pt"),
         confidence=args.conf,
         iou_threshold=args.iou,
-        cooldown=args.cooldown,
+        capture_cooldown=args.cooldown,
+        snapshot_cooldown=args.snapshot_cooldown,
         pre_roll_ms=getattr(args, "pre_roll_ms", 300),
         device=device,
         imgsz=imgsz,

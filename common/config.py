@@ -38,7 +38,8 @@ class DetectionConfig:
     model_path: str
     confidence: float = 0.45
     iou_threshold: float = 0.5
-    cooldown: float = 0.8
+    capture_cooldown: float = 0.8
+    snapshot_cooldown: float = 1.0
     pre_roll_ms: int = 300
     device: str | None = None
     imgsz: int | None = None

@@ -48,7 +48,6 @@ class PreRollLanesSystem:
             self.model,
             conf=detection.confidence,
             iou=detection.iou_threshold,
-            cooldown=detection.cooldown,
             device=detection.device,
             imgsz=detection.imgsz,
             infer_every_n=detection.infer_every_n,
@@ -105,7 +104,7 @@ class PreRollLanesSystem:
         """Dispara la captura pre-roll SOLO si un vehículo está completo dentro
         del ROI y respeta el cooldown. Retorna ``True`` si se disparó."""
         now = time.time()
-        if trigger_capture and (now - self._last_capture_ts) > self.detection.cooldown:
+        if trigger_capture and (now - self._last_capture_ts) > self.detection.capture_cooldown:
             self._last_capture_ts = now
             threading.Thread(target=self._capture_preroll, daemon=True).start()
             return True

@@ -171,7 +171,6 @@ def main() -> int:
         model,
         conf=detection.confidence,
         iou=detection.iou_threshold,
-        cooldown=detection.cooldown,
         device=detection.device,
         imgsz=detection.imgsz,
         infer_every_n=detection.infer_every_n,
@@ -234,7 +233,7 @@ def main() -> int:
             # Estabiliza sobre 'vehículo COMPLETO dentro del ROI' (no solo 'detección')
             if stable.update(inside_roi):
                 now = time.time()
-                if (now - last_capture_ts) > detection.cooldown:
+                if (now - last_capture_ts) > detection.capture_cooldown:
                     last_capture_ts = now
                     threading.Thread(
                         target=async_capture,

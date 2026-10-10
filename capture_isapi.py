@@ -71,7 +71,7 @@ def main() -> int:
         model,
         conf=detection.confidence,
         iou=detection.iou_threshold,
-        cooldown=detection.cooldown,
+        snapshot_cooldown=detection.snapshot_cooldown,
         device=detection.device,
         imgsz=detection.imgsz,
         infer_every_n=detection.infer_every_n,

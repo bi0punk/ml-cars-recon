@@ -54,7 +54,8 @@ class TestCliDetectionConfig:
         assert cfg.model_path == "yolov8n.pt"
         assert cfg.confidence == pytest.approx(0.45)
         assert cfg.iou_threshold == pytest.approx(0.5)
-        assert cfg.cooldown == pytest.approx(0.8)
+        assert cfg.capture_cooldown == pytest.approx(0.8)
+        assert cfg.snapshot_cooldown == pytest.approx(1.0)
         assert cfg.pre_roll_ms == 300
         assert cfg.imgsz is None
         assert cfg.device is None
