@@ -597,3 +597,11 @@ class TestBestFrame:
     def test_excludes_frames_outside_window(self):
         flat = np.full((32, 32, 3), 50, dtype=np.uint8)
         assert best_frame([(1.0, flat)], target_timestamp=10.0, window_ms=50, min_frames=1) is None
+
+    def test_fast_sharpness_noisy_beats_blank_on_large_frame(self):
+        from common.frames import _fast_sharpness
+
+        rng = np.random.default_rng(1)
+        blank = np.zeros((1440, 2560, 3), dtype=np.uint8)
+        noisy = rng.integers(0, 256, size=(1440, 2560, 3)).astype(np.uint8)
+        assert _fast_sharpness(noisy) > _fast_sharpness(blank)

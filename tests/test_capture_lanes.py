@@ -78,3 +78,17 @@ class TestPreRollLanesCaptureGating:
         assert system._maybe_capture(True) is True
         system._last_capture_ts = time.time()  # captura reciente -> cooldown activo
         assert system._maybe_capture(True) is False
+
+
+class TestPrerollCli:
+    def test_filter_to_road_requires_poly(self, monkeypatch):
+        import sys
+
+        import capture_preroll
+
+        monkeypatch.setattr(
+            sys, "argv", ["capture_preroll.py", "--filter-to-road", "--password", "x"]
+        )
+        with pytest.raises(SystemExit) as exc:
+            capture_preroll.main()
+        assert exc.value.code == 2
