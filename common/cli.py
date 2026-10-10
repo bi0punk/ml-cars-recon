@@ -5,7 +5,6 @@ Centralizes camera/detection/ROI argument groups and resolution into the
 """
 
 import argparse
-import os
 
 from common.config import CameraConfig, DetectionConfig, ROIConfig, env_value
 
@@ -56,7 +55,7 @@ def add_detection_arguments(parser: argparse.ArgumentParser) -> None:
     group.add_argument(
         "--infer-every-n",
         type=int,
-        default=1,
+        default=None,
         dest="infer_every_n",
         help="Correr inferencia solo cada N frames (para no saturar la CPU)",
     )
@@ -87,20 +86,24 @@ def camera_config_from_args(args: argparse.Namespace) -> CameraConfig:
     )
 
 
-def detection_config_from_args(args: argparse.Namespace) -> DetectionConfig:
-    device = getattr(args, "device", None)
-    if not device:
-        device = os.environ.get("YOLO_DEVICE") or None
-    imgsz = getattr(args, "imgsz", None)
-    if not imgsz:
-        imgsz = int(os.environ["YOLO_IMGSZ"]) if os.environ.get("YOLO_IMGSZ") else None
-
-    env_infer = os.environ.get("YOLO_INFER_EVERY_N")
-    infer_every_n = getattr(args, "infer_every_n", env_infer or 1)
+def _optional_int(value: str) -> int | None:
+    """Convierte un string de env a int, ignorando vacíos/no numéricos."""
+    value = value.strip()
+    if not value:
+        return None
     try:
-        infer_every_n = int(infer_every_n)
-    except (TypeError, ValueError):
-        infer_every_n = 1
+        return int(value)
+    except ValueError:
+        return None
+
+
+def detection_config_from_args(args: argparse.Namespace) -> DetectionConfig:
+    device = getattr(args, "device", None) or env_value("YOLO_DEVICE") or None
+    imgsz = getattr(args, "imgsz", None) or _optional_int(env_value("YOLO_IMGSZ", default=""))
+    env_infer = _optional_int(env_value("YOLO_INFER_EVERY_N", default=""))
+    infer_every_n = getattr(args, "infer_every_n", None)
+    if infer_every_n is None:
+        infer_every_n = env_infer or 1
 
     return DetectionConfig(
         model_path=args.model or env_value("YOLO_MODEL", default="yolov8n.pt"),
