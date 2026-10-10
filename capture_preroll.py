@@ -22,6 +22,7 @@ import os
 import sys
 import threading
 import time
+from dataclasses import dataclass
 
 import cv2
 import numpy as np
@@ -37,6 +38,18 @@ from common.utils import StableTrigger, save_jpeg, set_ffmpeg_low_latency_env, s
 
 logger = logging.getLogger(__name__)
 WINDOW = "Live (YOLOv8 LPR pre-roll)"
+
+
+@dataclass(frozen=True)
+class CaptureSettings:
+    """Ajustes de captura de pre-roll (independientes del CLI)."""
+
+    save_dir: str = "captures_preroll"
+    pre_roll_ms: int = 300
+    sharp_window_ms: int = 200
+    sharp_min_frames: int = 1
+    sharp_max_frames: int = 9
+    fallback_isapi: bool = False
 
 
 def road_filter_for(
@@ -61,24 +74,24 @@ def road_filter_for(
 def async_capture(
     grab_main: FrameGrabberBuffer,
     now: float,
-    args: argparse.Namespace,
+    settings: CaptureSettings,
     camera,
     detection,
 ) -> None:
     """Guarda el frame más nítido del buffer, con fallback ISAPI."""
-    target_ts = now - (detection.pre_roll_ms / 1000.0)
-    frames = grab_main.get_frames_in_window(target_ts, args.sharp_window_ms)
+    target_ts = now - (settings.pre_roll_ms / 1000.0)
+    frames = grab_main.get_frames_in_window(target_ts, settings.sharp_window_ms)
     best = best_frame(
         frames,
         target_ts,
-        args.sharp_window_ms,
-        min_frames=args.sharp_min_frames,
-        max_frames=args.sharp_max_frames,
+        settings.sharp_window_ms,
+        min_frames=settings.sharp_min_frames,
+        max_frames=settings.sharp_max_frames,
     )
     if best is not None:
-        save_jpeg(best, folder=args.save_dir, prefix="preroll_best")
+        save_jpeg(best, folder=settings.save_dir, prefix="preroll_best")
         return
-    if args.fallback_isapi:
+    if settings.fallback_isapi:
         logger.warning("Buffer MAIN sin frames suficientes. Fallback ISAPI...")
         save_isapi_snapshot(
             camera.host,
@@ -168,6 +181,14 @@ def main() -> int:
     road_poly = None
     stable = StableTrigger(stable_frames=args.stable_frames, rearm_frames=args.rearm_frames)
     last_capture_ts = 0.0
+    settings = CaptureSettings(
+        save_dir=args.save_dir,
+        pre_roll_ms=args.pre_roll_ms,
+        sharp_window_ms=args.sharp_window_ms,
+        sharp_min_frames=args.sharp_min_frames,
+        sharp_max_frames=args.sharp_max_frames,
+        fallback_isapi=args.fallback_isapi,
+    )
 
     logger.info("Transmisión iniciada. Presiona 'q' para salir.")
     try:
@@ -217,7 +238,7 @@ def main() -> int:
                     last_capture_ts = now
                     threading.Thread(
                         target=async_capture,
-                        args=(grab_main, now, args, camera, detection),
+                        args=(grab_main, now, settings, camera, detection),
                         daemon=True,
                     ).start()
 

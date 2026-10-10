@@ -5,6 +5,7 @@ import pytest
 pytest.importorskip("cv2")
 
 import capture_preroll_lanes as lanes_mod
+from capture_preroll import CaptureSettings
 from common.config import CameraConfig, DetectionConfig, ROIConfig
 
 
@@ -43,6 +44,21 @@ def _make_system(monkeypatch) -> lanes_mod.PreRollLanesSystem:
         ROIConfig(),
         enable_lane_detection=False,
     )
+
+
+class TestCaptureSettings:
+    def test_defaults(self):
+        settings = CaptureSettings()
+        assert settings.save_dir == "captures_preroll"
+        assert settings.pre_roll_ms == 300
+        assert settings.sharp_window_ms == 200
+        assert settings.sharp_max_frames == 9
+        assert settings.fallback_isapi is False
+
+    def test_is_immutable(self):
+        settings = CaptureSettings(save_dir="x")
+        with pytest.raises(AttributeError):
+            settings.save_dir = "y"
 
 
 class TestPreRollLanesCaptureGating:
