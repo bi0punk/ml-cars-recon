@@ -119,6 +119,9 @@ def main() -> int:
     pr.add_argument("--filter-to-road", action="store_true", dest="filter_to_road")
     args = parser.parse_args()
 
+    if args.filter_to_road and not args.road_poly:
+        parser.error("--filter-to-road requiere --road-poly")
+
     camera = cli.camera_config_from_args(args)
     detection = cli.detection_config_from_args(args)
     roi_config = cli.roi_config_from_args(args)
@@ -184,9 +187,10 @@ def main() -> int:
                 continue
 
             H, W = frame.shape[:2]
-            if road_poly is None and args.filter_to_road and args.road_poly:
+            if road_poly is None and args.road_poly:
+                # --road-poly siempre se dibuja (visual); --filter-to-road además filtra
                 road_poly, road_filter = road_filter_for(args.road_poly, W, H)
-                if road_filter is not None:
+                if args.filter_to_road and road_filter is not None:
                     detector.box_filter = road_filter
             if road_poly is not None:
                 draw_polygon(frame, road_poly)
@@ -200,9 +204,10 @@ def main() -> int:
             roi = (x0, y0, x1, y1)
             cv2.rectangle(frame, (x0, y0), (x1, y1), (255, 255, 0), 2)
 
-            frame, detected, _inside = detector.detect(frame, roi)
+            frame, detected, inside_roi = detector.detect(frame, roi)
 
-            if stable.update(detected):
+            # Estabiliza sobre 'vehículo COMPLETO dentro del ROI' (no solo 'detección')
+            if stable.update(inside_roi):
                 now = time.time()
                 if (now - last_capture_ts) > detection.cooldown:
                     last_capture_ts = now
