@@ -24,14 +24,15 @@ Computer vision system for vehicle detection and license plate capture from IP c
 ## Características
 
 - Detección de vehículos (autos, camiones) en streams RTSP con YOLOv8
-- Captura y reconocimiento de patentes/license plates
-- Conteo de vehículos con ROI central configurable
-- Captura por carril con filtro de región de interés
-- Interfaz web Flask para visualización (web_app) con endpoint `/api/status`
+- Captura de snapshots ISAPI al pasar el vehículo por el ROI
+- Captura con **pre-roll** desde el main-stream (frame anterior al disparo)
+- Selección del frame **más nítido** en la ventana de pre-roll
+- Disparo **estable** (N frames consecutivos) y filtro opcional por polígono de carretera
+- Detección de carriles (Canny + Hough) con panel de estadísticas en vivo
+- Interfaz web Flask (`web_app`) con `/api/status`, MJPEG y snapshots
 - Reconexión automática con **backoff exponencial** ante pérdida del stream RTSP
 - `web_app` sin efectos colaterales al importar (cámara y modelo perezosos)
-- Lógica de detección compartida en `common/detector.py` (sin copiar/pegar)
-- Modo estable sin creación múltiple de ventanas
+- Toda la lógica compartida en `common/` (sin copiar/pegar)
 
 ## Stack
 
@@ -42,33 +43,34 @@ Computer vision system for vehicle detection and license plate capture from IP c
 ```
 ml-cars-recon/
 ├── common/                           # Módulos compartidos (ver detalle abajo)
+│   ├── cli.py                        # Argumentos CLI comunes (cámara/detección/ROI)
 │   ├── config.py                     # Helpers de env + dataclasses de configuración
-│   ├── utils.py                      # FFmpeg low-latency, directorios, JPEG, nitidez
+│   ├── utils.py                      # FFmpeg low-latency, JPEG, nitidez, StableTrigger
 │   ├── rtsp.py                       # Builders de URLs RTSP (flavors streaming/ISAPI)
 │   ├── isapi.py                      # Snapshot vía ISAPI (Digest auth)
-│   ├── frames.py                     # Grabbers de frames en hilo (latest + buffer pre-roll)
+│   ├── frames.py                     # Grabbers (latest + buffer pre-roll) + best_frame
 │   ├── detector.py                   # VehicleDetector: inferencia YOLO + snapshot ISAPI
 │   ├── lanes.py                      # Detector de carriles
-│   └── geometry.py                   # ROI y geometría de bounding boxes
-├── app_yolo_patentes.py              # Detección YOLO de patentes
-├── detecta_autos_y_captura_roi_central.py  # Conteo con ROI central
-├── captura_autos_con_carril.py       # Captura por carril
-├── basic_car_detector.py             # Demo básica
-├── app_autos_captura.py              # Captura automática RTSP
-├── app_autos_captures_ultimo.py      # Captura con pre-roll desde MAIN
-├── app_forma_patentes_basico.py      # Forma básica de patentes
-├── testapp.py                        # App de prueba
+│   └── geometry.py                   # ROI, bounding boxes y polígonos
+├── capture_isapi.py                  # Snapshot ISAPI cuando el vehículo cruza el ROI
+├── capture_preroll.py                # Pre-roll + frame nítido + estabilidad + road filter
+├── capture_preroll_lanes.py          # Pre-roll + carriles + estadísticas en vivo
 ├── web_app/                          # Interfaz web Flask
-├── tests/                            # Smoke + tests unitarios de common/
-├── requirements.txt
-├── pyproject.toml
+├── tests/                            # Smoke + unitarios de common/ + web app
+├── pyproject.toml                    # Dependencias de proyecto (fuente única)
 ├── .env.example
 └── README.md
 ```
 
-Todos los scripts comparten la lógica a través de `common/` (grabbers con
-reconexión, builders RTSP, ISAPI, conveniencia y `VehicleDetector`), en lugar
-de copiar y pegar el mismo código.
+### Módulos compartidos
+
+| Módulo            | Responsabilidad                                                        |
+|-------------------|------------------------------------------------------------------------|
+| `common/cli.py`   | Grupos de argparse (cámara/detección/ROI) + resolución a configs        |
+| `common/config.py`| `CameraConfig`, `DetectionConfig`, `ROIConfig` + `env_value`            |
+| `common/frames.py`| `FrameGrabberLatest`, `FrameGrabberBuffer` (reconexión con backoff), `best_frame` |
+| `common/detector.py` | `VehicleDetector`: predicción en ROI, `infer_every_n`, `device`/`imgsz`, margen y `box_filter` |
+| `common/geometry.py` | `box_inside_roi`, `compute_roi`, polígonos de carretera              |
 
 ### Reconexión con backoff exponencial
 
@@ -76,60 +78,71 @@ Los grabbers de `common/frames.py` detectan streams muertos: si `read()`
 falla `stale_frame_threshold` veces seguidas (por defecto 5), se fuerza la
 reapertura del stream. El delay de reconexión crece exponencialmente
 (`reconnect_delay` → `max_reconnect_delay`, por defecto 2s → 60s) y se
-resetea al recibir un frame válido. Estos parámetros son configurables en el
-constructor de `FrameGrabberLatest` / `FrameGrabberBuffer`.
+resetea al recibir un frame válido. Parámetros configurables en el constructor.
 
 Directorios de captura (runtime, excluidos de git):
 
 ```
-captures_preroll/    # pre-roll del main-stream (captura por carril / testapp)
+captures_preroll/    # pre-roll del main-stream (capture_preroll*)
 captures_fallback/   # frames de respaldo del sub-stream
-captures_lpr/        # frames seleccionados por nitidez (LPR)
-isapi_snaps/         # snapshots descargados vía ISAPI
+isapi_snaps/         # snapshots descargados vía ISAPI (y web app)
 ```
 
 ## Requisitos
 
 - Python 3.11+
 - Cámara IP con stream RTSP
-- Modelo YOLOv8 (descargado automáticamente por ultralytics)
-- GPU recomendada para rendimiento en tiempo real
+- Modelo YOLOv8 (descargado automáticamente por ultralytics la primera vez)
+- GPU recomendada para rendimiento en tiempo real (usa `--device cpu/cuda:0/mps`)
 
 ## Instalación
+
+Las dependencias se declaran **solo** en `pyproject.toml`:
 
 ```bash
 git clone https://github.com/bi0punk/ml-cars-recon.git
 cd ml-cars-recon
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e ".[dev]"
 ```
+
+> El modelo `yolov8n.pt` se descarga automáticamente al ejecutar cualquier
+> script (o descárgalo con `python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"`).
 
 ## Uso
 
 ```bash
-# Detección de patentes con YOLO
-python app_yolo_patentes.py --user admin --password tu_pass --host 192.168.1.64
+# 1) Snapshot ISAPI cuando el vehículo esté COMPLETO dentro del ROI
+python capture_isapi.py --host 192.168.1.64 --user admin --password tu_pass \
+    --rtsp-channel 102 --snapshot-channel 101
 
-# Conteo de autos con ROI central
-python detecta_autos_y_captura_roi_central.py
+# 2) Pre-roll desde el main-stream con el frame más nítido + disparo estable
+python capture_preroll.py --host 192.168.1.64 --user admin --password tu_pass \
+    --pre-roll-ms 300 --sharp-window-ms 200 --stable-frames 3 --rearm-frames 8 \
+    --filter-to-road --road-poly "0.15,0.55;0.85,0.55;0.95,0.98;0.05,0.98"
 
-# Captura por carril
-python captura_autos_con_carril.py
+# 3) Pre-roll + carriles + panel de estadísticas
+python capture_preroll_lanes.py --host 192.168.1.64 --user admin --password tu_pass
+
+# Opciones de rendimiento comunes (todas cargadas desde .env si está definida):
+#   --device cpu|0|cuda:0|mps   --imgsz 640   --infer-every-n 2
+#   YOLO_DEVICE / YOLO_IMGSZ / YOLO_INFER_EVERY_N
 
 # Web app (Flask)
 python web_app/app.py
 ```
 
-> **Nota sobre URLs RTSP:** algunos firmwares exigen el sufijo `01` en el
-> canal de sub-stream (p.ej. `10101`). Si tu cámara no conecta, usa la
-> bandera `--substream-suffix` en los scripts de captura.
+Opciones útiles en todos los script: `--help` para ver grupos de argumentos
+(cámara, detección, ROI) y variables de entorno en `.env.example` como fallback
+para las credenciales.
 
 ## Tests
 
 ```bash
-pip install pytest ruff
-pytest -q
+pip install -e ".[dev]"
 ruff check .
+ruff format --check .
+pytest -q
 ```
 
 ## Configuración
@@ -141,45 +154,47 @@ Variables de entorno (ver `.env.example`):
 | `RTSP_USER`            | `admin`                        | Usuario RTSP                             |
 | `RTSP_PASSWORD`        | —                              | Contraseña RTSP                          |
 | `RTSP_HOST`            | `192.168.1.64`                 | IP de la cámara                          |
-| `RTSP_PORT`            | `554`                          | Puerto RTSP                              |
-| `RTSP_CHANNEL`         | `101`                          | Canal RTSP (102 = sub-stream)            |
-| `SNAPSHOT_CHANNEL`     | `101`                          | Canal ISAPI para snapshots (main)        |
-| `YOLO_MODEL`           | `yolov8n.pt`                   | Modelo YOLO                              |
-| `YOLO_CONF`            | `0.45`                         | Umbral de confianza YOLO (scripts)       |
-| `CONFIDENCE_THRESHOLD` | `0.35`                         | Umbral de confianza (basic_car_detector) |
+| `RTSP_CHANNEL`         | `102`                          | Canal sub-stream (detección)             |
+| `SNAPSHOT_CHANNEL`     | `101`                          | Canal main-stream (snapshot o buffer)    |
+| `YOLO_MODEL`           | `yolov8n.pt`                   | Modelo YOLO (CLIs)                       |
+| `YOLO_DEVICE`          | —                              | `cpu`/`cuda:0`/`mps` (CLIs)              |
+| `YOLO_IMGSZ`           | —                              | Tamaño de entrada YOLO (CLIs)            |
+| `YOLO_INFER_EVERY_N`   | `1`                            | Inferencia cada N frames (CLIs)          |
 | `RTSP_URL`             | —                              | URL completa del stream (web app)        |
 | `CAPTURE_DIR`          | `isapi_snaps`                  | Directorio de capturas (web app)         |
 | `LATEST_LIMIT`         | `3`                            | Imágenes recientes a listar              |
 | `MODEL_PATH`           | `yolov8n.pt`                   | Modelo YOLO (web app)                    |
 | `INFER_EVERY_N`        | `2`                            | Inferir cada N frames (web app)          |
-| `IMG_SIZE`             | `640`                          | Tamaño de entrada YOLO                   |
-| `ROI_W_PCT` / `ROI_H_PCT` / `ROI_CY_PCT` | `0.60`/`0.50`/`0.45` | ROI relativo (web app)        |
+| `IMG_SIZE`             | `640`                          | Tamaño de entrada YOLO (web app)         |
+| `ROI_W_PCT` / `ROI_H_PCT` / `ROI_CY_PCT` | `0.60`/`0.50`/`0.45` | ROI relativo (web app)     |
 | `ISAPI_HOST` / `ISAPI_USER` / `ISAPI_PASSWORD` | `192.168.1.64`/`admin`/— | Credenciales ISAPI (web app) |
 | `SNAPSHOT_COOLDOWN`    | `1.0`                          | Seg entre snapshots (web app)            |
 | `HOST` / `PORT`        | `127.0.0.1`/`5000`             | Bind del servidor Flask                  |
-| `API_TOKEN`            | —                              | Token opcional para rutas `/api`/`/video_feed` |
+| `API_TOKEN`            | —                              | Token opcional para `/api` y `/video_feed` |
 
 ## CI
 
-GitHub Actions ejecuta `ruff check .` y `pytest -q` en cada push y PR. El job
-de tests instala las dependencias ligeras necesarias (`numpy`, `opencv-python`,
-`requests`, `flask`, `python-dotenv`) — sin `ultralytics`/`torch` para CI
-rápida, ya que los tests no importan YOLO.
+GitHub Actions ejecuta en cada push y PR:
+
+- `ruff check .`
+- `ruff format --check .`
+- `pytest -q` (dependencias ligeras: `numpy`, `opencv-python`, `requests`, `flask`, `python-dotenv` — sin `ultralytics`/`torch` para CI rápida).
 
 ## Datos
 
 - Los pesos de modelos (`.pt`, `.h5`) y capturas están excluidos del control de versiones
 - Descargar `yolov8n.pt` desde Ultralytics o entrenar un modelo personalizado
-- Las capturas se guardan en `captures_preroll/`, `captures_fallback/`, `captures_lpr/` e `isapi_snaps/`
+- Las capturas se guardan en `captures_preroll/`, `captures_fallback/` e `isapi_snaps/`
 
 ## Limitaciones / Roadmap
 
 - [x] Reconexión robusta con backoff exponencial ante pérdida del stream
-- [x] Módulo compartido de detección (`common/detector.py`)
-- [x] Web app sin efectos colaterales al importar + endpoint `/api/status`
+- [x] Detección compartida en `common/detector.py` (con `infer_every_n`, device/imgz)
+- [x] CLI consolidado (3 entrypoints, sin scripts duplicados)
+- [x] Web app sin efectos colaterales + `/api/status` + auth por token
 - [ ] Reconocimiento OCR de patentes con EasyOCR/PaddleOCR
 - [ ] Seguimiento de vehículos multi-frame (tracking)
-- [ ] Dashboard web con estadísticas en tiempo real (base en `/api/status`)
+- [ ] Dashboard web con estadísticas en tiempo real
 - [ ] Almacenamiento en base de datos de detecciones
 
 ## Licencia

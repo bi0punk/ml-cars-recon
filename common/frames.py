@@ -13,6 +13,8 @@ from collections import deque
 import cv2
 import numpy as np
 
+from common.utils import sharpness
+
 logger = logging.getLogger(__name__)
 
 
@@ -99,7 +101,9 @@ class FrameGrabberLatest:
                     stale_reads = 0
                     backoff = min(backoff * 2, self.max_reconnect_delay)
                 else:
-                    logger.debug("[%s] Frame inválido (%d), reintentando...", self.name, stale_reads)
+                    logger.debug(
+                        "[%s] Frame inválido (%d), reintentando...", self.name, stale_reads
+                    )
                     time.sleep(0.05)
                 continue
 
@@ -111,7 +115,9 @@ class FrameGrabberLatest:
 
             if self.width and self.height:
                 try:
-                    frame = cv2.resize(frame, (self.width, self.height), interpolation=cv2.INTER_AREA)
+                    frame = cv2.resize(
+                        frame, (self.width, self.height), interpolation=cv2.INTER_AREA
+                    )
                 except Exception:
                     logger.error("[%s] Error redimensionando frame", self.name)
                     continue
@@ -232,7 +238,9 @@ class FrameGrabberBuffer:
                     stale_reads = 0
                     backoff = min(backoff * 2, self.max_reconnect_delay)
                 else:
-                    logger.debug("[%s] Frame inválido (%d), reintentando...", self.name, stale_reads)
+                    logger.debug(
+                        "[%s] Frame inválido (%d), reintentando...", self.name, stale_reads
+                    )
                     time.sleep(0.01)
                 continue
 
@@ -243,7 +251,9 @@ class FrameGrabberBuffer:
 
             if self.width and self.height:
                 try:
-                    frame = cv2.resize(frame, (self.width, self.height), interpolation=cv2.INTER_AREA)
+                    frame = cv2.resize(
+                        frame, (self.width, self.height), interpolation=cv2.INTER_AREA
+                    )
                 except Exception:
                     continue
 
@@ -264,7 +274,9 @@ class FrameGrabberBuffer:
             closest = min(self.buffer, key=lambda x: abs(x[0] - target_timestamp))
             return closest[1].copy()
 
-    def get_frames_in_window(self, target_timestamp: float, window_ms: float) -> list[tuple[float, np.ndarray]]:
+    def get_frames_in_window(
+        self, target_timestamp: float, window_ms: float
+    ) -> list[tuple[float, np.ndarray]]:
         """Devuelve ``(timestamp, frame)`` dentro de una ventana de tiempo alrededor del target."""
         window = window_ms / 1000.0
         with self.lock:
@@ -293,3 +305,30 @@ class FrameGrabberBuffer:
         if self.cap:
             self.cap.release()
         logger.info("[%s] Liberado", self.name)
+
+
+def best_frame(
+    buffer: list[tuple[float, np.ndarray]],
+    target_timestamp: float,
+    window_ms: float,
+    min_frames: int = 1,
+    max_frames: int = 9,
+) -> np.ndarray | None:
+    """Elige el frame más nítido dentro de una ventana temporal.
+
+    - ``buffer``: lista ``(timestamp, frame)`` (ver ``get_frames_in_window``).
+    - Se conservan los ``max_frames`` temporalmente más cercanos a
+      ``target_timestamp`` y se puntúa su nitidez.
+    - Si hay menos de ``min_frames`` candidatos, retorna ``None``.
+    """
+    if not buffer:
+        return None
+    window = window_ms / 1000.0
+    candidates = [(ts, frame) for ts, frame in buffer if abs(ts - target_timestamp) <= window]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: abs(item[0] - target_timestamp))
+    candidates = candidates[:max_frames]
+    if len(candidates) < min_frames:
+        return None
+    return max(candidates, key=lambda item: sharpness(item[1]))[1]

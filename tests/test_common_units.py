@@ -9,8 +9,8 @@ import pytest
 
 from common.config import env_value
 from common.detector import VehicleDetector
-from common.frames import FrameGrabberBuffer, FrameGrabberLatest
-from common.geometry import box_inside_roi, compute_roi
+from common.frames import FrameGrabberBuffer, FrameGrabberLatest, best_frame
+from common.geometry import box_inside_roi, compute_roi, parse_polygon, point_inside_polygon
 from common.isapi import snapshot_url
 from common.rtsp import (
     build_isapi_channel_url,
@@ -18,7 +18,7 @@ from common.rtsp import (
     build_streaming_channel_url,
     build_streaming_url,
 )
-from common.utils import save_jpeg, set_ffmpeg_low_latency_env, sharpness
+from common.utils import StableTrigger, save_jpeg, set_ffmpeg_low_latency_env, sharpness
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +54,22 @@ class TestGeometry:
         assert y1 >= 0
         assert x2 <= 100
         assert y2 <= 100
+
+    def test_parse_polygon_converts_fractions_to_pixels(self):
+        poly = parse_polygon("0.1,0.1;0.9,0.1;0.9,0.9", 1000, 500)
+        assert poly is not None
+        assert poly.dtype == np.int32
+        assert list(poly[0]) == [100, 50]
+        assert list(poly[1]) == [900, 50]
+
+    def test_parse_polygon_rejects_fewer_than_3_points(self):
+        assert parse_polygon("0.1,0.1;0.5,0.5", 100, 100) is None
+        assert parse_polygon("", 100, 100) is None
+
+    def test_point_inside_polygon(self):
+        poly = parse_polygon("0.1,0.1;0.9,0.1;0.9,0.9;0.1,0.9", 1000, 1000)
+        assert point_inside_polygon((500, 500), poly) is True
+        assert point_inside_polygon((5, 5), poly) is False
 
 
 # ---------------------------------------------------------------------------
@@ -178,9 +194,10 @@ class TestIsapi:
                 yield b""
 
         monkeypatch.setattr(isapi_mod.requests, "get", lambda *a, **k: _Resp())
-        assert isapi_mod.save_isapi_snapshot(
-            "192.168.1.64", "admin", "pass", folder=str(tmp_path)
-        ) is None
+        assert (
+            isapi_mod.save_isapi_snapshot("192.168.1.64", "admin", "pass", folder=str(tmp_path))
+            is None
+        )
         assert not list(tmp_path.iterdir())
 
     def test_save_isapi_snapshot_timeout(self, monkeypatch, tmp_path):
@@ -190,9 +207,10 @@ class TestIsapi:
             raise isapi_mod.requests.exceptions.Timeout()
 
         monkeypatch.setattr(isapi_mod.requests, "get", _boom)
-        assert isapi_mod.save_isapi_snapshot(
-            "192.168.1.64", "admin", "pass", folder=str(tmp_path)
-        ) is None
+        assert (
+            isapi_mod.save_isapi_snapshot("192.168.1.64", "admin", "pass", folder=str(tmp_path))
+            is None
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -424,7 +442,7 @@ class _FakeYolo:
         self._boxes = boxes
         self.calls = 0
 
-    def predict(self, source, conf=0.45, classes=None, verbose=False):
+    def predict(self, source, conf=0.45, classes=None, verbose=False, **kwargs):
         self.calls += 1
         return [_FakeResult(self._boxes)]
 
@@ -472,3 +490,101 @@ class TestVehicleDetector:
         det = VehicleDetector(_FakeYolo([]), cooldown=0.0)
         assert det.trigger_if_ready("h", "u", "p", "101") is True
         assert det.trigger_if_ready("h", "u", "p", "101") is True
+
+
+# ---------------------------------------------------------------------------
+# common.detector (optimizaciones: infer_every_n, margin, box_filter)
+# ---------------------------------------------------------------------------
+class TestVehicleDetectorAdvanced:
+    @staticmethod
+    def make_frame():
+        return np.full((100, 100, 3), 60, dtype=np.uint8)
+
+    def test_infer_every_n_skips_yolo_on_skipped_frames(self):
+        box = _FakeBox(20, 20, 80, 80, 2, 0.9)
+        model = _FakeYolo([box])
+        det = VehicleDetector(model, infer_every_n=2)
+        roi = (0, 0, 100, 100)
+
+        det.detect(self.make_frame(), roi)  # frame 1 -> corre
+        det.detect(self.make_frame(), roi)  # frame 2 -> salta
+        det.detect(self.make_frame(), roi)  # frame 3 -> corre
+        assert model.calls == 2
+
+    def test_infer_every_n_reuses_last_state(self):
+        box = _FakeBox(20, 20, 80, 80, 2, 0.9)
+        det = VehicleDetector(_FakeYolo([box]), infer_every_n=3)
+        roi = (0, 0, 100, 100)
+        _, detected, trigger = det.detect(self.make_frame(), roi)
+        assert (detected, trigger) == (True, True)
+        _, detected2, trigger2 = det.detect(self.make_frame(), roi)
+        assert (detected2, trigger2) == (True, True)
+
+    def test_margin_prevents_trigger_for_touching_box(self):
+        # Box relativo (0,0,80,80) con roi (10,10,90,90) -> global (10,10,90,90), justo en el borde
+        box = _FakeBox(0, 0, 80, 80, 2, 0.9)
+        roi = (10, 10, 90, 90)
+        assert VehicleDetector(_FakeYolo([box]), margin=0).detect(self.make_frame(), roi)[2] is True
+        assert (
+            VehicleDetector(_FakeYolo([box]), margin=1).detect(self.make_frame(), roi)[2] is False
+        )
+
+    def test_box_filter_can_discard_detections(self):
+        box = _FakeBox(20, 20, 80, 80, 2, 0.9)
+        det = VehicleDetector(_FakeYolo([box]), box_filter=lambda b, c: False)
+        _, detected, trigger = det.detect(self.make_frame(), (0, 0, 100, 100))
+        assert detected is False
+        assert trigger is False
+
+
+# ---------------------------------------------------------------------------
+# common.utils.StableTrigger
+# ---------------------------------------------------------------------------
+class TestStableTrigger:
+    def test_requires_consecutive_stable_frames(self):
+        trigger = StableTrigger(stable_frames=3, rearm_frames=2)
+        assert trigger.update(True) is False
+        assert trigger.update(True) is False
+        assert trigger.update(True) is True
+        assert trigger.update(True) is False  # ya activo, no re-dispara
+
+    def test_rearms_after_outside_frames(self):
+        trigger = StableTrigger(stable_frames=2, rearm_frames=2)
+        trigger.update(True)
+        assert trigger.update(True) is True
+        trigger.update(False)
+        trigger.update(False)  # rearm
+        assert trigger.update(True) is False
+        assert trigger.update(True) is True
+
+    def test_reset(self):
+        trigger = StableTrigger(stable_frames=1, rearm_frames=1)
+        assert trigger.update(True) is True
+        trigger.reset()
+        assert trigger.update(True) is True
+
+
+# ---------------------------------------------------------------------------
+# common.frames.best_frame
+# ---------------------------------------------------------------------------
+class TestBestFrame:
+    def test_returns_none_for_empty_buffer(self):
+        assert best_frame([], 0.0, 200) is None
+
+    def test_picks_sharpest_frame_in_window(self):
+        rng = np.random.default_rng(0)
+        flat = np.full((32, 32, 3), 50, dtype=np.uint8)
+        noisy = rng.integers(0, 256, size=(32, 32, 3)).astype(np.uint8)
+        buffer = [(10.0, flat), (10.05, noisy)]
+        chosen = best_frame(
+            buffer, target_timestamp=10.03, window_ms=200, min_frames=1, max_frames=9
+        )
+        assert chosen is noisy or sharpness(chosen) == sharpness(noisy)
+
+    def test_returns_none_when_below_min_frames(self):
+        flat = np.full((32, 32, 3), 50, dtype=np.uint8)
+        assert best_frame([(10.0, flat)], 10.0, 200, min_frames=3) is None
+
+    def test_excludes_frames_outside_window(self):
+        flat = np.full((32, 32, 3), 50, dtype=np.uint8)
+        assert best_frame([(1.0, flat)], target_timestamp=10.0, window_ms=50, min_frames=1) is None

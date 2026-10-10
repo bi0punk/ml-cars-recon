@@ -34,7 +34,9 @@ def save_isapi_snapshot(
             timeout=timeout,
             stream=True,
         )
-        if response.status_code == 200 and response.headers.get("Content-Type", "").startswith("image"):
+        if response.status_code == 200 and response.headers.get("Content-Type", "").startswith(
+            "image"
+        ):
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S_%f")[:-3]
             filename = os.path.join(folder, f"{timestamp}_isapi_{channel}.jpg")
             with open(filename, "wb") as f:

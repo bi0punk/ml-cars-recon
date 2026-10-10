@@ -19,21 +19,27 @@ def test_repo_has_license():
 
 def test_no_images_tracked():
     import subprocess
+
     tracked = subprocess.run(
-        ["git", "ls-files"], cwd=REPO_ROOT,
-        capture_output=True, text=True, check=True
+        ["git", "ls-files"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
     ).stdout
-    imgs = [line for line in tracked.splitlines() if line.lower().endswith((".jpg", ".jpeg", ".png"))]
+    imgs = [
+        line for line in tracked.splitlines() if line.lower().endswith((".jpg", ".jpeg", ".png"))
+    ]
     assert not imgs, f"Imágenes trackeadas: {imgs}"
 
 
 def test_no_model_files_tracked():
     import subprocess
+
     tracked = subprocess.run(
-        ["git", "ls-files"], cwd=REPO_ROOT,
-        capture_output=True, text=True, check=True
+        ["git", "ls-files"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
     ).stdout
-    models = [line for line in tracked.splitlines() if line.endswith((".pt", ".h5", ".keras", ".onnx", ".pkl"))]
+    models = [
+        line
+        for line in tracked.splitlines()
+        if line.endswith((".pt", ".h5", ".keras", ".onnx", ".pkl"))
+    ]
     assert not models, f"Modelos trackeados: {models}"
 
 

@@ -3,8 +3,8 @@
 """Interfaz web Flask para ml-cars-recon.
 
 Sin efectos colaterales al importar: la cámara y el modelo YOLO se crean de
-forma perezosa (``get_camera``), por lo que importar este módulo no arranca
-hilos de captura ni carga modelos pesados.
+forma perezosa (``get_camera`` / ``_get_model``), por lo que importar este
+módulo no arranca hilos de captura ni carga modelos pesados.
 """
 
 import glob
@@ -16,45 +16,39 @@ import time
 import cv2
 from flask import Flask, Response, abort, jsonify, render_template, request, send_from_directory
 
+from common.detector import VehicleDetector
 from common.frames import FrameGrabberLatest
-from common.geometry import box_inside_roi, compute_roi
+from common.geometry import compute_roi
 from common.isapi import save_isapi_snapshot as _save_isapi_snapshot
 from common.utils import set_ffmpeg_low_latency_env
 
 logger = logging.getLogger(__name__)
 
-# ============================
-# Configuración por variables
-# ============================
-RTSP_URL     = os.getenv("RTSP_URL", "")
-CAPTURE_DIR  = os.getenv("CAPTURE_DIR", "isapi_snaps")
-LATEST_LIMIT = int(os.getenv("LATEST_LIMIT", "3"))
 
-# Detección
-MODEL_PATH    = os.getenv("MODEL_PATH", "yolov8n.pt")
-YOLO_CONF     = float(os.getenv("YOLO_CONF", "0.45"))
-INFER_EVERY_N = int(os.getenv("INFER_EVERY_N", "2"))  # inferir cada N frames (para no bloquear)
-IMG_SIZE      = int(os.getenv("IMG_SIZE", "640"))
+class Config:
+    """Configuración de la web app (una única fuente de variables)."""
 
-# ROI (centrado, un poco más alto y extendido hacia abajo)
-ROI_W_PCT  = float(os.getenv("ROI_W_PCT", "0.60"))  # % del ancho
-ROI_H_PCT  = float(os.getenv("ROI_H_PCT", "0.50"))  # % del alto
-ROI_CY_PCT = float(os.getenv("ROI_CY_PCT", "0.45"))  # centro Y (0.50 = centro exacto, 0.45 = 10% arriba)
+    rtsp_url = os.getenv("RTSP_URL", "")
+    capture_dir = os.getenv("CAPTURE_DIR", "isapi_snaps")
+    latest_limit = int(os.getenv("LATEST_LIMIT", "3"))
 
-# ISAPI (para snapshots cuando vehículo está totalmente dentro del ROI)
-ISAPI_HOST       = os.getenv("ISAPI_HOST", "192.168.1.64")
-ISAPI_USER       = os.getenv("ISAPI_USER", "admin")
-ISAPI_PASSWORD   = os.getenv("ISAPI_PASSWORD", "")
-SNAPSHOT_CHANNEL = os.getenv("SNAPSHOT_CHANNEL", "101")  # main stream
-SNAPSHOT_COOLDOWN = float(os.getenv("SNAPSHOT_COOLDOWN", "1.0"))  # seg entre snapshots
+    model_path = os.getenv("MODEL_PATH", "yolov8n.pt")
+    yolo_conf = float(os.getenv("YOLO_CONF", "0.45"))
+    infer_every_n = max(1, int(os.getenv("INFER_EVERY_N", "2")))
+    imgsz = int(os.getenv("IMG_SIZE", "640"))
 
-# ``isapi.py`` crea el directorio de capturas si no existe (``os.makedirs``).
+    roi_w_pct = float(os.getenv("ROI_W_PCT", "0.60"))
+    roi_h_pct = float(os.getenv("ROI_H_PCT", "0.50"))
+    roi_cy_pct = float(os.getenv("ROI_CY_PCT", "0.45"))
 
-API_TOKEN = os.getenv("API_TOKEN", "")
+    isapi_host = os.getenv("ISAPI_HOST", "192.168.1.64")
+    isapi_user = os.getenv("ISAPI_USER", "admin")
+    isapi_password = os.getenv("ISAPI_PASSWORD", "")
+    snapshot_channel = os.getenv("SNAPSHOT_CHANNEL", "101")
+    snapshot_cooldown = float(os.getenv("SNAPSHOT_COOLDOWN", "1.0"))
 
-# Clases de vehículos (COCO): car=2, motorcycle=3, bus=5, truck=7
-VEHICLE_CLASSES = [2, 3, 5, 7]
-VEHICLE_LABELS = {"2": "car", "3": "motorcycle", "5": "bus", "7": "truck"}
+    api_token = os.getenv("API_TOKEN", "")
+
 
 _camera = None
 _model = None
@@ -70,63 +64,63 @@ def _get_model():
                 try:
                     from ultralytics import YOLO
 
-                    _model = YOLO(MODEL_PATH)
-                    logger.info("Modelo YOLO cargado: %s", MODEL_PATH)
-                except Exception as e:
+                    _model = YOLO(Config.model_path)
+                    logger.info("Modelo YOLO cargado: %s", Config.model_path)
+                except Exception as exc:
                     _model = None
-                    logger.error("Error al cargar modelo YOLO: %s", e)
+                    logger.error("Error al cargar modelo YOLO: %s", exc)
     return _model
 
 
 def require_auth():
-    token = request.headers.get("X-API-Token")
-    if not API_TOKEN:
+    if not Config.api_token:
         return
-    if not token or token != API_TOKEN:
+    token = request.headers.get("X-API-Token")
+    if not token or token != Config.api_token:
         abort(401, description="Unauthorized")
 
 
-# ============================
-# Utilidades
-# ============================
-def list_latest_images(limit=LATEST_LIMIT):
-    pattern = os.path.join(CAPTURE_DIR, "*.jpg")
-    files = glob.glob(pattern)
-    files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
-    files = files[:max(0, int(limit))]
-    return [os.path.basename(p) for p in files]
+def list_latest_images(limit: int | None = None) -> list[str]:
+    limit = Config.latest_limit if limit is None else max(0, int(limit))
+    files = glob.glob(os.path.join(Config.capture_dir, "*.jpg"))
+    files.sort(key=os.path.getmtime, reverse=True)
+    return [os.path.basename(p) for p in files[:limit]]
 
 
-def save_isapi_snapshot(folder=CAPTURE_DIR, timeout=3):
+def save_isapi_snapshot(folder: str | None = None, timeout: int = 3) -> str | None:
     """Descarga snapshot vía ISAPI con Digest (usa la config del módulo)."""
     return _save_isapi_snapshot(
-        ISAPI_HOST,
-        ISAPI_USER,
-        ISAPI_PASSWORD,
-        folder=folder,
-        channel=SNAPSHOT_CHANNEL,
+        Config.isapi_host,
+        Config.isapi_user,
+        Config.isapi_password,
+        folder=folder or Config.capture_dir,
+        channel=Config.snapshot_channel,
         timeout=timeout,
     )
 
 
-# ============================
-# Cámara con detección embebida
-# ============================
 class DetectorCamera:
     """Captura frames vía ``FrameGrabberLatest`` y corre YOLO sobre el ROI.
 
-    La adquisición de frames (con reconexión robusta) la maneja el grabber
-    en su propio hilo; este hilo solo hace inferencia y anotación.
+    La adquisición de frames (con reconexión robusta) la maneja el grabber en
+    su propio hilo; este hilo solo hace inferencia y anotación mediante
+    ``VehicleDetector``.
     """
 
-    def __init__(self, src, model):
+    def __init__(self, src: str, model):
         self.src = src
         self.model = model
+        self.detector = VehicleDetector(
+            model,
+            conf=Config.yolo_conf,
+            cooldown=Config.snapshot_cooldown,
+            imgsz=Config.imgsz,
+            infer_every_n=Config.infer_every_n,
+        )
         self.grabber = FrameGrabberLatest(src, name="web")
-        self.frame = None  # frame procesado (con anotaciones)
+        self.frame = None
         self.lock = threading.Lock()
         self.running = True
-        self.frame_idx = 0
         self.last_snap_ts = 0.0
         self.stats = {
             "frames_processed": 0,
@@ -134,105 +128,57 @@ class DetectorCamera:
             "captures": 0,
             "start_time": time.time(),
         }
-        self.t = threading.Thread(target=self._loop, daemon=True)
-        self.t.start()
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
 
-    def _loop(self):
+    def _loop(self) -> None:
         while self.running:
             ok, frame = self.grabber.read()
             if not ok or frame is None:
                 time.sleep(0.05)
                 continue
 
-            self.frame_idx += 1
             draw = frame.copy()
             H, W = draw.shape[:2]
-
-            # ROI centrado (un poco más alto y extendido hacia abajo)
-            roi_rect = compute_roi(W, H, roi_w=ROI_W_PCT, roi_h=ROI_H_PCT, roi_cy=ROI_CY_PCT)
+            roi_rect = compute_roi(
+                W, H, roi_w=Config.roi_w_pct, roi_h=Config.roi_h_pct, roi_cy=Config.roi_cy_pct
+            )
             x0, y0, x1, y1 = roi_rect
             cx = W // 2
 
-            # Dibujo ROI
             cv2.rectangle(draw, (x0, y0), (x1, y1), (255, 200, 0), 2)
             cv2.line(draw, (cx, y0), (cx, y1), (255, 255, 255), 1)
 
-            detected = False
-            trigger_snapshot = False
-
-            # Inference cada N frames para mantener FPS
-            do_infer = self.model is not None and (self.frame_idx % max(1, INFER_EVERY_N) == 0)
-
-            if do_infer and (x1 - x0) > 0 and (y1 - y0) > 0:
-                roi_region = draw[y0:y1, x0:x1]
-                try:
-                    results = self.model.predict(
-                        source=roi_region,
-                        conf=YOLO_CONF,
-                        classes=VEHICLE_CLASSES,
-                        verbose=False,
-                        imgsz=IMG_SIZE,
-                    )
-                except Exception as e:
-                    logger.error("Predicción YOLO fallida: %s", e)
-                    results = []
-            else:
-                results = []
-
-            for r in results:
-                for b in getattr(r, "boxes", []):
-                    try:
-                        cls_id = int(b.cls[0])
-                        conf = float(b.conf[0])
-                    except Exception:
-                        continue
-
-                    # Coordenadas relativas al ROI → mover a coords globales
-                    xA, yA, xB, yB = b.xyxy[0].int().tolist()
-                    xA_g, yA_g = xA + x0, yA + y0
-                    xB_g, yB_g = xB + x0, yB + y0
-
-                    detected = True
-                    cv2.rectangle(draw, (xA_g, yA_g), (xB_g, yB_g), (0, 255, 0), 2)
-                    label = VEHICLE_LABELS.get(str(cls_id), str(cls_id))
-                    cv2.putText(
-                        draw,
-                        f"{label} {conf:.2f}",
-                        (xA_g, max(yA_g - 5, 20)),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (0, 255, 0),
-                        2,
-                    )
-
-                    if box_inside_roi((xA_g, yA_g, xB_g, yB_g), roi_rect):
-                        trigger_snapshot = True
-
+            draw, detected, trigger_snapshot = self.detector.detect(draw, roi_rect)
             if detected:
                 self.stats["detections"] += 1
             self.stats["frames_processed"] += 1
 
-            # Banner superior
             status_color = (0, 255, 0) if detected else (0, 0, 255)
             status_text = "VEHICULO DETECTADO" if detected else "SIN DETECCION"
             cv2.rectangle(draw, (0, 0), (W, 36), (0, 0, 0), -1)
             cv2.putText(draw, status_text, (10, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
+            cv2.putText(
+                draw,
+                f"ROI {x1 - x0}x{y1 - y0}",
+                (10, H - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (200, 200, 200),
+                1,
+            )
 
-            # Info ROI
-            cv2.putText(draw, f"ROI {x1 - x0}x{y1 - y0}", (10, H - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+            if trigger_snapshot and Config.isapi_password:
+                now = time.time()
+                if (now - self.last_snap_ts) > Config.snapshot_cooldown:
+                    self.last_snap_ts = now
+                    self.stats["captures"] += 1
+                    threading.Thread(target=save_isapi_snapshot, daemon=True).start()
 
-            # Snapshot con cooldown
-            now = time.time()
-            if trigger_snapshot and (now - self.last_snap_ts) > SNAPSHOT_COOLDOWN:
-                self.last_snap_ts = now
-                self.stats["captures"] += 1
-                threading.Thread(target=save_isapi_snapshot, daemon=True).start()
-
-            # Publicamos frame procesado
             with self.lock:
                 self.frame = draw
 
-    def read_jpeg(self):
+    def read_jpeg(self) -> bytes | None:
         with self.lock:
             if self.frame is None:
                 return None
@@ -242,7 +188,6 @@ class DetectorCamera:
         return buf.tobytes()
 
     def status(self) -> dict:
-        """Estado de la cámara para monitoreo."""
         runtime = max(time.time() - self.stats["start_time"], 0.001)
         return {
             "connected": self.grabber.ok,
@@ -256,25 +201,25 @@ class DetectorCamera:
             },
         }
 
-    def stop(self):
+    def stop(self) -> None:
         self.running = False
         try:
-            if self.t.is_alive():
-                self.t.join(timeout=1.0)
+            if self._thread.is_alive():
+                self._thread.join(timeout=1.0)
         except Exception:
             pass
         self.grabber.release()
 
 
-def get_camera():
+def get_camera() -> DetectorCamera:
     """Crea (y cachea) la cámara de forma perezosa."""
     global _camera
     if _camera is None:
-        _camera = DetectorCamera(RTSP_URL, _get_model())
+        _camera = DetectorCamera(Config.rtsp_url, _get_model())
     return _camera
 
 
-def reset_camera():
+def reset_camera() -> None:
     """Detiene y elimina la cámara actual (útil en tests/shutdown)."""
     global _camera
     if _camera is not None:
@@ -282,11 +227,7 @@ def reset_camera():
         _camera = None
 
 
-# ============================
-# Flask
-# ============================
-def create_app():
-    # RTSP baja latencia (debe quedar seteado antes de crear la cámara)
+def create_app() -> Flask:
     set_ffmpeg_low_latency_env("tcp")
 
     app = Flask(__name__)
@@ -308,14 +249,14 @@ def create_app():
                     time.sleep(0.05)
                     continue
                 yield boundary + b"\r\nContent-Type: image/jpeg\r\n\r\n" + frame + b"\r\n"
-                time.sleep(0.03)  # ~33 FPS máx; ajusta si quieres
+                time.sleep(0.03)
 
         return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
     @app.route("/api/latest_images")
     def api_latest_images():
         require_auth()
-        imgs = list_latest_images(limit=LATEST_LIMIT)
+        imgs = list_latest_images()
         now = int(time.time())
         data = [{"name": f, "url": f"/captures/{f}?t={now}"} for f in imgs]
         return jsonify(data)
@@ -329,16 +270,16 @@ def create_app():
 
     @app.route("/captures/<path:filename>")
     def captures(filename):
-        safe_dir = os.path.abspath(CAPTURE_DIR)
-        requested = os.path.abspath(os.path.join(CAPTURE_DIR, filename))
+        safe_dir = os.path.abspath(Config.capture_dir)
+        requested = os.path.abspath(os.path.join(Config.capture_dir, filename))
         if not requested.startswith(safe_dir):
             return abort(403)
         if not os.path.exists(requested):
             return abort(404)
-        return send_from_directory(CAPTURE_DIR, filename)
+        return send_from_directory(Config.capture_dir, filename)
 
     @app.route("/_shutdown", methods=["POST"])
-    def _shutdown():
+    def shutdown():
         require_auth()
         reset_camera()
         return "ok"
@@ -350,4 +291,9 @@ app = create_app()
 
 
 if __name__ == "__main__":
-    app.run(host=os.getenv("HOST", "127.0.0.1"), port=int(os.getenv("PORT", "5000")), debug=False, threaded=True)
+    app.run(
+        host=os.getenv("HOST", "127.0.0.1"),
+        port=int(os.getenv("PORT", "5000")),
+        debug=False,
+        threaded=True,
+    )

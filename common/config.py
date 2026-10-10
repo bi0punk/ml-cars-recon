@@ -40,6 +40,9 @@ class DetectionConfig:
     iou_threshold: float = 0.5
     cooldown: float = 0.8
     pre_roll_ms: int = 300
+    device: str | None = None
+    imgsz: int | None = None
+    infer_every_n: int = 1
 
 
 @dataclass

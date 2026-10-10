@@ -47,3 +47,42 @@ def save_jpeg(frame, folder="captures", prefix="frame", quality=95) -> str:
 def sharpness(frame) -> float:
     """Varianza de Laplacian como métrica de nitidez del frame."""
     return cv2.Laplacian(frame, cv2.CV_64F).var()
+
+
+class StableTrigger:
+    """Estabiliza el disparo: exige ``stable_frames`` frames positivos
+    consecutivos y se rearma tras ``rearm_frames`` frames negativos.
+
+    Evita capturas espurias por detecciones de un solo frame.
+    """
+
+    def __init__(self, stable_frames: int = 3, rearm_frames: int = 8):
+        self.stable_frames = max(1, int(stable_frames))
+        self.rearm_frames = max(0, int(rearm_frames))
+        self._inside = 0
+        self._outside = 0
+        self.active = False
+
+    def update(self, inside: bool) -> bool:
+        """Alimenta con ``inside`` (vehículo dentro del ROI).
+
+        Retorna ``True`` cuando se debe disparar.
+        """
+        if inside:
+            self._inside += 1
+            self._outside = 0
+        else:
+            self._inside = 0
+            self._outside += 1
+            if self._outside >= self.rearm_frames:
+                self.active = False
+
+        if self._inside >= self.stable_frames and not self.active:
+            self.active = True
+            return True
+        return False
+
+    def reset(self) -> None:
+        self._inside = 0
+        self._outside = 0
+        self.active = False
