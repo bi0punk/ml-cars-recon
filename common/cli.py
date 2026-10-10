@@ -62,6 +62,11 @@ def add_detection_arguments(parser: argparse.ArgumentParser) -> None:
     )
     group.add_argument("--device", default=None, help="Dispositivo (cpu, cuda:0, mps)")
     group.add_argument(
+        "--half",
+        action="store_true",
+        help="Inferencia FP16 (solo en aceleradores; se ignora en CPU)",
+    )
+    group.add_argument(
         "--infer-every-n",
         type=int,
         default=None,
@@ -124,6 +129,7 @@ def detection_config_from_args(args: argparse.Namespace) -> DetectionConfig:
         device=device,
         imgsz=imgsz,
         infer_every_n=max(1, infer_every_n),
+        half=bool(getattr(args, "half", False)),
     )
 
 

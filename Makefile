@@ -24,7 +24,7 @@ test-cov:
 	$(PYTHON) -m pytest --cov=common --cov=web_app --cov-report=term-missing
 
 typecheck:
-	mypy common/ web_app/
+	mypy
 
 coverage-html:
 	$(PYTHON) -m pytest --cov=common --cov=web_app --cov-report=html

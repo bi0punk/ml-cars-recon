@@ -47,6 +47,7 @@ class VehicleDetector:
         device: str | None = None,
         imgsz: int | None = None,
         infer_every_n: int = 1,
+        half: bool = False,
         margin: int = 0,
         box_filter: BoxFilter | None = None,
     ):
@@ -58,6 +59,7 @@ class VehicleDetector:
         self.device = device
         self.imgsz = imgsz
         self.infer_every_n = max(1, int(infer_every_n))
+        self.half = half
         self.margin = max(0, int(margin))
         self.box_filter = box_filter
         self.last_capture_ts = 0.0
@@ -154,6 +156,9 @@ class VehicleDetector:
             kwargs["imgsz"] = self.imgsz
         if self.device is not None:
             kwargs["device"] = self.device
+        # half (FP16) solo tiene sentido en aceleradores, no en CPU.
+        if self.half and self.device is not None:
+            kwargs["half"] = True
         return kwargs
 
     def trigger_if_ready(

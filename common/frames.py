@@ -283,23 +283,29 @@ class FrameGrabberBuffer:
                 logger.info("[%s] Buffer recibiendo frames", self.name)
 
     def get_closest_frame(self, target_timestamp: float) -> np.ndarray | None:
-        """Devuelve el frame cuyo timestamp está más cerca de ``target_timestamp``."""
+        """Devuelve el frame cuyo timestamp está más cerca de ``target_timestamp``.
+
+        READ-ONLY: retorna una referencia al frame almacenado (sin copia). No
+        debe mutarse; los consumidores actuales solo lo leen o lo guardan.
+        """
         with self.lock:
             if not self.buffer:
                 return None
             closest = min(self.buffer, key=lambda x: abs(x[0] - target_timestamp))
-            return closest[1].copy()
+            return closest[1]
 
     def get_frames_in_window(
         self, target_timestamp: float, window_ms: float
     ) -> list[tuple[float, np.ndarray]]:
-        """Devuelve ``(timestamp, frame)`` dentro de una ventana de tiempo alrededor del target."""
+        """Devuelve ``(timestamp, frame)`` en una ventana alrededor del target.
+
+        READ-ONLY: devuelve referencias a los frames almacenados (sin copias).
+        No deben mutarse.
+        """
         window = window_ms / 1000.0
         with self.lock:
             return [
-                (ts, frame.copy())
-                for ts, frame in self.buffer
-                if abs(ts - target_timestamp) <= window
+                (ts, frame) for ts, frame in self.buffer if abs(ts - target_timestamp) <= window
             ]
 
     def get_buffer_info(self) -> dict:
@@ -323,6 +329,19 @@ class FrameGrabberBuffer:
         logger.info("[%s] Liberado", self.name)
 
 
+def _fast_sharpness(frame: np.ndarray, max_side: int = 640) -> float:
+    """Nitidez sobre una miniatura para evitar el coste del Laplacian en 1080p."""
+    height, width = frame.shape[:2]
+    if max(height, width) > max_side:
+        scale = max_side / max(height, width)
+        small = cv2.resize(
+            frame, (int(width * scale), int(height * scale)), interpolation=cv2.INTER_AREA
+        )
+    else:
+        small = frame
+    return sharpness(small)
+
+
 def best_frame(
     buffer: list[tuple[float, np.ndarray]],
     target_timestamp: float,
@@ -334,7 +353,8 @@ def best_frame(
 
     - ``buffer``: lista ``(timestamp, frame)`` (ver ``get_frames_in_window``).
     - Se conservan los ``max_frames`` temporalmente más cercanos a
-      ``target_timestamp`` y se puntúa su nitidez.
+      ``target_timestamp`` y se puntúa su nitidez (downscale previo para
+      reducir el coste del Laplacian).
     - Si hay menos de ``min_frames`` candidatos, retorna ``None``.
     """
     if not buffer:
@@ -347,4 +367,4 @@ def best_frame(
     candidates = candidates[:max_frames]
     if len(candidates) < min_frames:
         return None
-    return max(candidates, key=lambda item: sharpness(item[1]))[1]
+    return max(candidates, key=lambda item: _fast_sharpness(item[1]))[1]

@@ -58,7 +58,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 ignore = ["E501"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 files = [
     "common",
     "web_app",
@@ -69,3 +69,18 @@ files = [
 ignore_missing_imports = true
 warn_unused_ignores = true
 no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = [
+    "numpy",
+    "numpy.*",
+    "cv2",
+    "ultralytics",
+    "ultralytics.*",
+    "flask",
+    "flask.*",
+    "requests",
+    "requests.*",
+    "dotenv",
+]
+follow_imports = "skip"

@@ -15,8 +15,8 @@ import argparse
 import logging
 import os
 import sys
-import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import cv2
 import numpy as np
@@ -52,6 +52,7 @@ class PreRollLanesSystem:
             device=detection.device,
             imgsz=detection.imgsz,
             infer_every_n=detection.infer_every_n,
+            half=detection.half,
         )
         self.lane_detector = LaneDetector() if enable_lane_detection else None
 
@@ -76,6 +77,7 @@ class PreRollLanesSystem:
             "captures": 0,
             "start_time": time.time(),
         }
+        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="lanes")
         self._last_capture_ts = 0.0
         logger.info("Sistema inicializado correctamente")
 
@@ -107,7 +109,7 @@ class PreRollLanesSystem:
         now = time.time()
         if trigger_capture and (now - self._last_capture_ts) > self.detection.capture_cooldown:
             self._last_capture_ts = now
-            threading.Thread(target=self._capture_preroll, daemon=True).start()
+            self._executor.submit(self._capture_preroll)
             return True
         return False
 
@@ -205,6 +207,7 @@ class PreRollLanesSystem:
         logger.info("Liberando recursos...")
         self.grab_sub.release()
         self.grab_main.release()
+        self._executor.shutdown(wait=False, cancel_futures=True)
         cv2.destroyAllWindows()
 
         runtime = max(time.time() - self.stats["start_time"], 0.001)

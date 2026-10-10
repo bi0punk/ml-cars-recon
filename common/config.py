@@ -49,6 +49,7 @@ class DetectionConfig:
     device: str | None = None
     imgsz: int | None = None
     infer_every_n: int = 1
+    half: bool = False
 
 
 @dataclass

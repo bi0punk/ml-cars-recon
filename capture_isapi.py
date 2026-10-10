@@ -76,6 +76,7 @@ def main() -> int:
         device=detection.device,
         imgsz=detection.imgsz,
         infer_every_n=detection.infer_every_n,
+        half=detection.half,
     )
 
     logger.info("Transmisión iniciada. Presiona 'q' para salir.")
@@ -84,7 +85,7 @@ def main() -> int:
         while True:
             ok, frame = grab.read()
             if not ok or frame is None:
-                blank = np.zeros((camera.height, camera.width, 3), dtype=np.uint8)
+                blank: np.ndarray = np.zeros((camera.height, camera.width, 3), dtype=np.uint8)
                 cv2.putText(
                     blank,
                     "Reintentando conexión RTSP...",

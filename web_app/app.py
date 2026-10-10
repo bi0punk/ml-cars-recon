@@ -167,15 +167,19 @@ class DetectorCamera:
     def __init__(self, src: str, model):
         self.src = src
         self.model = model
-        self.detector = VehicleDetector(
-            model,
-            conf=CONFIG.yolo_conf,
-            snapshot_cooldown=CONFIG.snapshot_cooldown,
-            imgsz=CONFIG.imgsz,
-            infer_every_n=CONFIG.infer_every_n,
+        self.detector = (
+            VehicleDetector(
+                model,
+                conf=CONFIG.yolo_conf,
+                snapshot_cooldown=CONFIG.snapshot_cooldown,
+                imgsz=CONFIG.imgsz,
+                infer_every_n=CONFIG.infer_every_n,
+            )
+            if model is not None
+            else None
         )
         self.grabber = FrameGrabberLatest(src, name="web")
-        self.frame = None
+        self.frame: Any = None
         self.lock = threading.Lock()
         self.running = True
         self.last_snap_ts = 0.0
@@ -210,7 +214,10 @@ class DetectorCamera:
             cv2.rectangle(draw, (x0, y0), (x1, y1), (255, 200, 0), 2)
             cv2.line(draw, (cx, y0), (cx, y1), (255, 255, 255), 1)
 
-            draw, detected, trigger_snapshot = self.detector.detect(draw, roi_rect)
+            if self.detector is not None:
+                draw, detected, trigger_snapshot = self.detector.detect(draw, roi_rect)
+            else:
+                detected, trigger_snapshot = False, False
             if detected:
                 self.stats["detections"] += 1
             self.stats["frames_processed"] += 1

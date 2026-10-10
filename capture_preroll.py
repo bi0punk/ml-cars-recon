@@ -20,8 +20,8 @@ import argparse
 import logging
 import os
 import sys
-import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 import cv2
@@ -39,6 +39,9 @@ from common.utils import StableTrigger, save_jpeg, set_ffmpeg_low_latency_env, s
 
 logger = logging.getLogger(__name__)
 WINDOW = "Live (YOLOv8 LPR pre-roll)"
+
+# Pool acotado para las capturas asíncronas (en vez de un thread por captura).
+_capture_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="preroll")
 
 
 @dataclass(frozen=True)
@@ -175,6 +178,7 @@ def main() -> int:
         device=detection.device,
         imgsz=detection.imgsz,
         infer_every_n=detection.infer_every_n,
+        half=detection.half,
         margin=args.inside_margin_px,
     )
 
@@ -195,7 +199,7 @@ def main() -> int:
         while True:
             ok, frame = grab_sub.read()
             if not ok or frame is None:
-                blank = np.zeros((camera.height, camera.width, 3), dtype=np.uint8)
+                blank: np.ndarray = np.zeros((camera.height, camera.width, 3), dtype=np.uint8)
                 cv2.putText(
                     blank,
                     "Reintentando conexión RTSP...",
@@ -236,11 +240,9 @@ def main() -> int:
                 now = time.time()
                 if (now - last_capture_ts) > detection.capture_cooldown:
                     last_capture_ts = now
-                    threading.Thread(
-                        target=async_capture,
-                        args=(grab_main, now, settings, camera, detection),
-                        daemon=True,
-                    ).start()
+                    _capture_executor.submit(
+                        async_capture, grab_main, now, settings, camera, detection
+                    )
 
             msg = "VEHICULO DETECTADO" if detected else "SIN DETECCION"
             color = (0, 200, 0) if detected else (0, 0, 255)
@@ -256,6 +258,7 @@ def main() -> int:
         grab_sub.release()
         grab_main.release()
         cv2.destroyAllWindows()
+        _capture_executor.shutdown(wait=False, cancel_futures=True)
         logger.info("Transmisión finalizada correctamente.")
     return 0
 
