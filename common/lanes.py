@@ -30,7 +30,7 @@ class LaneDetector:
     def _roi_mask(self, img: np.ndarray, vertices: np.ndarray) -> np.ndarray:
         """Aplica máscara de ROI."""
         mask = np.zeros_like(img)
-        cv2.fillPoly(mask, vertices, 255)
+        cv2.fillPoly(mask, [vertices], (255,))
         return cv2.bitwise_and(img, mask)
 
     def _calculate_slope_intercept(self, line: np.ndarray) -> tuple[float, float]:

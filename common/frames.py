@@ -37,7 +37,7 @@ class FrameGrabberLatest:
         self.width = width
         self.height = height
         self.name = name
-        self.cap = None
+        self.cap: cv2.VideoCapture | None = None
         self.frame: np.ndarray | None = None
         self.ok = False
         self.stopped = False
@@ -59,17 +59,18 @@ class FrameGrabberLatest:
             logger.warning("[%s] Timeout esperando primer frame", self.name)
 
     def _open_stream(self) -> bool:
-        if self.cap is not None:
-            with contextlib.suppress(Exception):
+        with contextlib.suppress(Exception):
+            if self.cap is not None:
                 self.cap.release()
 
         logger.info("[%s] Conectando a: %s", self.name, self.rtsp_url)
-        self.cap = self._cap_factory(self.rtsp_url, cv2.CAP_FFMPEG)
+        cap = self._cap_factory(self.rtsp_url, cv2.CAP_FFMPEG)
 
         with contextlib.suppress(Exception):
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-        is_opened = self.cap.isOpened()
+        is_opened = cap.isOpened()
+        self.cap = cap
         self.reconnect_count += 1
         if is_opened:
             logger.info("[%s] Conexión RTSP exitosa", self.name)
@@ -83,12 +84,18 @@ class FrameGrabberLatest:
         stale_reads = 0
 
         while not self.stopped:
-            if (self.cap is None or not self.cap.isOpened()) and not self._open_stream():
+            cap = self.cap
+            if (cap is None or not cap.isOpened()) and not self._open_stream():
                 time.sleep(backoff)
                 backoff = min(backoff * 2, self.max_reconnect_delay)
                 continue
 
-            ret, frame = self.cap.read()
+            cap = self.cap
+            if cap is None:
+                time.sleep(backoff)
+                continue
+
+            ret, frame = cap.read()
             if not ret or frame is None:
                 self.ok = False
                 stale_reads += 1
@@ -175,7 +182,7 @@ class FrameGrabberBuffer:
         self.height = height
         self.name = name
         self.max_buffer_size = int(max_seconds * max(fps_hint, 1)) + 5
-        self.cap = None
+        self.cap: cv2.VideoCapture | None = None
         self.buffer: deque = deque(maxlen=self.max_buffer_size)
         self.ok = False
         self.stopped = False
@@ -197,17 +204,18 @@ class FrameGrabberBuffer:
             logger.warning("[%s] Timeout esperando conexión", self.name)
 
     def _open_stream(self) -> bool:
-        if self.cap is not None:
-            with contextlib.suppress(Exception):
+        with contextlib.suppress(Exception):
+            if self.cap is not None:
                 self.cap.release()
 
         logger.info("[%s] Conectando a: %s", self.name, self.rtsp_url)
-        self.cap = self._cap_factory(self.rtsp_url, cv2.CAP_FFMPEG)
+        cap = self._cap_factory(self.rtsp_url, cv2.CAP_FFMPEG)
 
         with contextlib.suppress(Exception):
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-        is_opened = self.cap.isOpened()
+        is_opened = cap.isOpened()
+        self.cap = cap
         self.reconnect_count += 1
         if is_opened:
             logger.info("[%s] Conexión exitosa", self.name)
@@ -221,12 +229,18 @@ class FrameGrabberBuffer:
         stale_reads = 0
 
         while not self.stopped:
-            if (self.cap is None or not self.cap.isOpened()) and not self._open_stream():
+            cap = self.cap
+            if (cap is None or not cap.isOpened()) and not self._open_stream():
                 time.sleep(backoff)
                 backoff = min(backoff * 2, self.max_reconnect_delay)
                 continue
 
-            ret, frame = self.cap.read()
+            cap = self.cap
+            if cap is None:
+                time.sleep(backoff)
+                continue
+
+            ret, frame = cap.read()
             if not ret or frame is None or frame.size == 0:
                 self.ok = False
                 stale_reads += 1

@@ -14,16 +14,20 @@ jobs:
       - uses: astral-sh/setup-uv@v3
         with:
           python-version: "3.12"
-      - run: uv pip install ruff
+      - run: uv pip install ruff mypy
       - run: ruff check .
       - run: ruff format --check .
+      - run: mypy
 
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
         with:
-          python-version: "3.12"
-      - run: uv pip install pytest numpy opencv-python requests flask python-dotenv
-      - run: pytest -q
+          python-version: ${{ matrix.python-version }}
+      - run: uv pip install pytest pytest-cov numpy opencv-python requests flask python-dotenv
+      - run: pytest --cov-fail-under=70

@@ -23,6 +23,7 @@ dev = [
     "pytest>=8.0.0",
     "pytest-cov>=5.0.0",
     "ruff>=0.6.0",
+    "mypy>=1.10",
 ]
 
 [project.urls]
@@ -55,3 +56,16 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+files = [
+    "common",
+    "web_app",
+    "capture_isapi.py",
+    "capture_preroll.py",
+    "capture_preroll_lanes.py",
+]
+ignore_missing_imports = true
+warn_unused_ignores = true
+no_implicit_optional = true
