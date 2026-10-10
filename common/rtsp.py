@@ -11,29 +11,59 @@ para esos casos usa las variantes ``*_channel_url``.
 """
 
 
+def _suffix(transport: str | None) -> str:
+    """Sufijo de URL para forzar transporte (p.ej. ``?tcp`` en algunos firmwares)."""
+    return f"?{transport}" if transport else ""
+
+
 def build_streaming_url(
-    host: str, user: str, password: str, channel: str = "101", port: int = 554
+    host: str,
+    user: str,
+    password: str,
+    channel: str = "101",
+    port: int = 554,
+    transport: str | None = None,
 ) -> str:
     """URL RTSP tipo ``/Streaming/Channels/{canal}`` (sin sufijo de sub-stream)."""
-    return f"rtsp://{user}:{password}@{host}:{port}/Streaming/Channels/{channel}"
+    return (
+        f"rtsp://{user}:{password}@{host}:{port}/Streaming/Channels/{channel}{_suffix(transport)}"
+    )
 
 
 def build_streaming_channel_url(
-    host: str, user: str, password: str, channel: str = "101", port: int = 554
+    host: str,
+    user: str,
+    password: str,
+    channel: str = "101",
+    port: int = 554,
+    transport: str | None = None,
 ) -> str:
     """URL RTSP tipo ``/Streaming/Channels/{canal}01`` (con sufijo de sub-stream)."""
-    return build_streaming_url(host, user, password, f"{channel}01", port)
+    return build_streaming_url(host, user, password, f"{channel}01", port, transport)
 
 
 def build_isapi_url(
-    host: str, user: str, password: str, channel: str = "101", port: int = 554
+    host: str,
+    user: str,
+    password: str,
+    channel: str = "101",
+    port: int = 554,
+    transport: str | None = None,
 ) -> str:
     """URL RTSP tipo ``/ISAPI/Streaming/channels/{canal}`` (sin sufijo de sub-stream)."""
-    return f"rtsp://{user}:{password}@{host}:{port}/ISAPI/Streaming/channels/{channel}"
+    return (
+        f"rtsp://{user}:{password}@{host}:{port}/ISAPI/Streaming/channels/{channel}"
+        f"{_suffix(transport)}"
+    )
 
 
 def build_isapi_channel_url(
-    host: str, user: str, password: str, channel: str = "101", port: int = 554
+    host: str,
+    user: str,
+    password: str,
+    channel: str = "101",
+    port: int = 554,
+    transport: str | None = None,
 ) -> str:
     """URL RTSP tipo ``/ISAPI/Streaming/channels/{canal}01`` (con sufijo de sub-stream)."""
-    return build_isapi_url(host, user, password, f"{channel}01", port)
+    return build_isapi_url(host, user, password, f"{channel}01", port, transport)

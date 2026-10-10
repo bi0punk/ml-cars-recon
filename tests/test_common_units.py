@@ -105,6 +105,15 @@ class TestRtspUrls:
         url = build_streaming_url(self.HOST, self.USER, self.PASS, self.CH, port=8554)
         assert url.endswith(":8554/Streaming/Channels/101")
 
+    def test_transport_suffix(self):
+        assert build_isapi_url(self.HOST, self.USER, self.PASS, self.CH, transport="tcp") == (
+            "rtsp://admin:clave@192.168.1.64:554/ISAPI/Streaming/channels/101?tcp"
+        )
+        assert build_streaming_url(
+            self.HOST, self.USER, self.PASS, self.CH, transport="udp"
+        ).endswith("?udp")
+        assert build_isapi_url(self.HOST, self.USER, self.PASS, self.CH).endswith("/101")
+
 
 # ---------------------------------------------------------------------------
 # common.config
