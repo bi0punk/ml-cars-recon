@@ -1,24 +1,23 @@
 # ml-cars-recon
 
-Computer vision system for vehicle detection and license plate capture from IP camera RTSP streams using YOLO object detection models and OpenCV.
+Sistema de visión por computador para detección de vehículos y captura de patentes desde streams RTSP de cámaras IP, usando modelos YOLO de detección de objetos y OpenCV.
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11+-blue)](https://python.org)
 [![CI](https://github.com/bi0punk/ml-cars-recon/actions/workflows/ci.yml/badge.svg)](https://github.com/bi0punk/ml-cars-recon/actions/workflows/ci.yml)
 
-## Tabla de Contenidos
+## Contenido
 
 - [Características](#características)
-- [Stack](#stack)
 - [Arquitectura](#arquitectura)
-- [Requisitos](#requisitos)
+- [Stack](#stack)
+- [Estructura del repositorio](#estructura-del-repositorio)
 - [Instalación](#instalación)
 - [Uso](#uso)
-- [Tests y calidad](#tests-y-calidad)
 - [Configuración](#configuración)
-- [CI](#ci)
+- [Tests / CI](#tests--ci)
 - [Datos](#datos)
-- [Limitaciones / Roadmap](#limitaciones--roadmap)
+- [Roadmap](#roadmap)
 - [Licencia](#licencia)
 
 ## Características
@@ -35,33 +34,20 @@ Computer vision system for vehicle detection and license plate capture from IP c
 - Lógica compartida en `common/` (sin copiar/pegar)
 - Rendimiento: `--infer-every-n`, `--imgsz`, `--device`, `--half` (FP16)
 
-## Stack
-
-- Python 3.11+, Ultralytics YOLOv8, OpenCV, Flask, NumPy
-
 ## Arquitectura
 
-```
-ml-cars-recon/
-├── common/                           # Módulos compartidos (ver detalle abajo)
-│   ├── cli.py                        # Argumentos CLI comunes (cámara/detección/ROI)
-│   ├── config.py                     # Helpers de env + dataclasses + constantes
-│   ├── utils.py                      # FFmpeg low-latency, JPEG, nitidez, StableTrigger
-│   ├── rtsp.py                       # Builders de URLs RTSP (streaming/ISAPI, transport)
-│   ├── isapi.py                      # Snapshot vía ISAPI (Digest auth, sesión reusable)
-│   ├── frames.py                     # Grabbers (latest + buffer pre-roll) + best_frame
-│   ├── detector.py                   # VehicleDetector: inferencia YOLO + snapshot ISAPI
-│   ├── lanes.py                      # Detector de carriles parametrizable
-│   └── geometry.py                   # ROI, bounding boxes y polígonos
-├── capture_isapi.py                  # Snapshot ISAPI cuando el vehículo cruza el ROI
-├── capture_preroll.py                # Pre-roll + frame nítido + estabilidad + road filter
-├── capture_preroll_lanes.py          # Pre-roll + carriles + estadísticas en vivo
-├── web_app/                          # Interfaz web Flask (paquete instalable)
-├── tests/                            # Unitarios de common/ + web app
-├── pyproject.toml                    # Dependencias + config de ruff/mypy/pytest (fuente única)
-├── Makefile                          # lint / format / test / typecheck / coverage
-├── .pre-commit-config.yaml
-└── .env.example
+```mermaid
+flowchart LR
+    CAM[Cámara IP RTSP] -->|sub-stream - detección| GRAB[FrameGrabber<br/>latest / buffer pre-roll<br/>backoff exponencial]
+    GRAB --> DET[VehicleDetector<br/>YOLOv8 sobre ROI]
+    DET --> TRIG{¿disparo estable<br/>+ filtro por polígono?}
+    TRIG -->|no| CONT[continúa detección]
+    TRIG -->|sí| SNAP[Snapshot ISAPI<br/>Digest auth - sesión reusable]
+    GRAB -->|main-stream pre-roll| PREF[Pre-roll + frame más nítido<br/>best_frame]
+    PREF --> TRIG2{¿estable?}
+    TRIG2 -->|sí| SNAP
+    DET --> WEB[web_app Flask<br/>/api/status, MJPEG, snapshots]
+    SNAP --> OUT[(captures_preroll/<br/>isapi_snaps/)]
 ```
 
 ### Módulos compartidos
@@ -82,6 +68,35 @@ reapertura del stream. El delay de reconexión crece exponencialmente
 (`reconnect_delay` → `max_reconnect_delay`, por defecto 2s → 60s) y se
 resetea al recibir un frame válido. Parámetros configurables en el constructor.
 
+## Stack
+
+- Python 3.11+, Ultralytics YOLOv8, OpenCV, Flask, NumPy
+
+## Estructura del repositorio
+
+```
+ml-cars-recon/
+├── common/                           # Módulos compartidos (ver detalle arriba)
+│   ├── cli.py                        # Argumentos CLI comunes (cámara/detección/ROI)
+│   ├── config.py                     # Helpers de env + dataclasses + constantes
+│   ├── utils.py                      # FFmpeg low-latency, JPEG, nitidez, StableTrigger
+│   ├── rtsp.py                       # Builders de URLs RTSP (streaming/ISAPI, transport)
+│   ├── isapi.py                      # Snapshot vía ISAPI (Digest auth, sesión reusable)
+│   ├── frames.py                     # Grabbers (latest + buffer pre-roll) + best_frame
+│   ├── detector.py                   # VehicleDetector: inferencia YOLO + snapshot ISAPI
+│   ├── lanes.py                      # Detector de carriles parametrizable
+│   └── geometry.py                   # ROI, bounding boxes y polígonos
+├── capture_isapi.py                  # Snapshot ISAPI cuando el vehículo cruza el ROI
+├── capture_preroll.py                # Pre-roll + frame nítido + estabilidad + road filter
+├── capture_preroll_lanes.py          # Pre-roll + carriles + estadísticas en vivo
+├── web_app/                          # Interfaz web Flask (paquete instalable)
+├── tests/                            # Unitarios de common/ + web app
+├── pyproject.toml                    # Dependencias + config de ruff/mypy/pytest (fuente única)
+├── Makefile                          # lint / format / test / typecheck / coverage
+├── .pre-commit-config.yaml
+└── .env.example
+```
+
 Directorios de captura (runtime, excluidos de git):
 
 ```
@@ -89,13 +104,6 @@ captures_preroll/    # pre-roll del main-stream (capture_preroll*)
 captures_fallback/   # frames de respaldo del sub-stream
 isapi_snaps/         # snapshots descargados vía ISAPI (y web app)
 ```
-
-## Requisitos
-
-- Python 3.11+
-- Cámara IP con stream RTSP
-- Modelo YOLOv8 (descargado automáticamente por ultralytics la primera vez)
-- GPU recomendada para tiempo real (usa `--device cuda:0 --half` para FP16)
 
 ## Instalación
 
@@ -113,6 +121,8 @@ y `capture-preroll-lanes`.
 
 > El modelo `yolov8n.pt` se descarga automáticamente al ejecutar cualquier
 > script o con `python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"`.
+
+Requisitos: Python 3.11+, cámara IP con stream RTSP, modelo YOLOv8 (auto-descarga), GPU recomendada para tiempo real (`--device cuda:0 --half` para FP16).
 
 ## Uso
 
@@ -142,26 +152,6 @@ python web_app/app.py
 
 > **Nota road-poly:** `--road-poly` dibuja el polígono (visual);
 > `--filter-to-road` además ignora vehículos fuera de él y exige `--road-poly`.
-
-## Tests y calidad
-
-```bash
-make install-dev      # instala con dev deps
-make lint             # ruff check
-make format-check     # ruff format --check
-make typecheck        # mypy (config en pyproject)
-make test             # pytest (con cobertura en addopts)
-make coverage-html    # reporte HTML
-```
-
-O directamente:
-
-```bash
-ruff check . && ruff format --check .
-mypy
-pytest                       # addopts ya incluye --cov=common --cov=web_app
-pre-commit install           # opcional: hooks de ruff y saneamiento
-```
 
 ## Configuración
 
@@ -195,9 +185,27 @@ Variables de entorno (ver `.env.example`):
 - Comparación de token en tiempo constante (`hmac.compare_digest`).
 - `/_shutdown` valida el header `Origin` (bloqueo de CSRF cross-origin).
 
-## CI
+## Tests / CI
 
-GitHub Actions ejecuta en cada push y PR:
+```bash
+make install-dev      # instala con dev deps
+make lint             # ruff check
+make format-check     # ruff format --check
+make typecheck        # mypy (config en pyproject)
+make test             # pytest (con cobertura en addopts)
+make coverage-html    # reporte HTML
+```
+
+O directamente:
+
+```bash
+ruff check . && ruff format --check .
+mypy
+pytest                       # addopts ya incluye --cov=common --cov=web_app
+pre-commit install           # opcional: hooks de ruff y saneamiento
+```
+
+CI — GitHub Actions ejecuta en cada push y PR:
 
 - Job **lint**: `ruff check .`, `ruff format --check .` y `mypy`.
 - Job **test**: matriz Python 3.11/3.12 con `pytest --cov-fail-under=70`
@@ -211,7 +219,7 @@ GitHub Actions ejecuta en cada push y PR:
 - Descargar `yolov8n.pt` desde Ultralytics o entrenar un modelo personalizado
 - Las capturas se guardan en `captures_preroll/`, `captures_fallback/` e `isapi_snaps/`
 
-## Limitaciones / Roadmap
+## Roadmap
 
 - [x] Reconexión robusta con backoff exponencial ante pérdida del stream
 - [x] Detección compartida en `common/detector.py` (con `infer_every_n`, device/imgz/half)
@@ -225,4 +233,4 @@ GitHub Actions ejecuta en cada push y PR:
 
 ## Licencia
 
-MIT
+MIT — ver [LICENSE](LICENSE).
