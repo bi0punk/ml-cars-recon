@@ -111,7 +111,8 @@ class DetectorCamera:
                 time.sleep(0.05)
                 continue
 
-            draw = frame.copy()
+            # ``read`` ya devuelve una copia; anotar sobre ella no afecta al grabber.
+            draw = frame
             height, width = draw.shape[:2]
             roi_rect = compute_roi(
                 width,

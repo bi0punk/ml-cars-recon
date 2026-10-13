@@ -80,22 +80,23 @@ def main() -> int:
     )
 
     logger.info("Transmisión iniciada. Presiona 'q' para salir.")
+    # Frame de "reconectando" pre-renderizado una sola vez (evita recomputar).
+    blank_frame: np.ndarray = np.zeros((camera.height, camera.width, 3), dtype=np.uint8)
+    cv2.putText(
+        blank_frame,
+        "Reintentando conexión RTSP...",
+        (60, camera.height // 2),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1,
+        (0, 0, 255),
+        3,
+    )
 
     try:
         while True:
             ok, frame = grab.read()
             if not ok or frame is None:
-                blank: np.ndarray = np.zeros((camera.height, camera.width, 3), dtype=np.uint8)
-                cv2.putText(
-                    blank,
-                    "Reintentando conexión RTSP...",
-                    (60, camera.height // 2),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1,
-                    (0, 0, 255),
-                    3,
-                )
-                cv2.imshow(WINDOW, blank)
+                cv2.imshow(WINDOW, blank_frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
                 time.sleep(0.05)

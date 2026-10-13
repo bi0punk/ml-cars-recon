@@ -51,10 +51,11 @@ class LaneDetector:
             return left_lines, right_lines
 
         for line in lines:
-            x1, y1, x2, y2 = line.reshape(4)
+            coords = line.reshape(4)
+            x1, y1, x2, y2 = coords
             if abs(y2 - y1) < 10:
                 continue
-            slope, intercept = self._calculate_slope_intercept(line.reshape(4))
+            slope, intercept = self._calculate_slope_intercept(coords)
             if abs(slope) < 0.3 or abs(slope) > 3:
                 continue
             if slope < 0:

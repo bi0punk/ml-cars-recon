@@ -141,22 +141,22 @@ class PreRollLanesSystem:
         current_fps = 0.0
 
         logger.info("Sistema iniciado. Presiona 'q' para salir.")
+        blank_frame = np.zeros((self.camera.height, self.camera.width, 3), dtype=np.uint8)
+        cv2.putText(
+            blank_frame,
+            "Reconectando...",
+            (60, self.camera.height // 2),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (0, 0, 255),
+            3,
+        )
         try:
             while True:
                 ok, frame = self.grab_sub.read()
                 if not ok or frame is None:
                     logger.warning("Frame no disponible")
-                    blank = np.zeros((self.camera.height, self.camera.width, 3), dtype=np.uint8)
-                    cv2.putText(
-                        blank,
-                        "Reconectando...",
-                        (60, self.camera.height // 2),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1,
-                        (0, 0, 255),
-                        3,
-                    )
-                    cv2.imshow(window_name, blank)
+                    cv2.imshow(window_name, blank_frame)
                     if cv2.waitKey(100) & 0xFF == ord("q"):
                         break
                     continue
