@@ -657,3 +657,121 @@ class TestBestFrame:
         blank = np.zeros((1440, 2560, 3), dtype=np.uint8)
         noisy = rng.integers(0, 256, size=(1440, 2560, 3)).astype(np.uint8)
         assert _fast_sharpness(noisy) > _fast_sharpness(blank)
+
+
+# ---------------------------------------------------------------------------
+# common.preroll
+# ---------------------------------------------------------------------------
+class _FakeMain:
+    def __init__(self, frames=None, closest=None):
+        self._frames = frames or []
+        self._closest = closest
+
+    def get_frames_in_window(self, target_timestamp, window_ms):
+        return self._frames
+
+    def get_closest_frame(self, target_timestamp):
+        return self._closest
+
+
+class _FakeSub:
+    def __init__(self, frame=None, ok=True):
+        self._frame = frame
+        self._ok = ok
+
+    def read(self):
+        return self._ok, self._frame
+
+
+class _FakeCamera:
+    host = "192.168.1.64"
+    user = "admin"
+    password = "pass"
+    snapshot_channel = "101"
+
+
+class TestPreRollCore:
+    def test_road_filter_for_invalid_poly(self):
+        from common.preroll import road_filter_for
+
+        assert road_filter_for("", 100, 100) == (None, None)
+
+    def test_road_filter_for_filters_by_center(self):
+        from common.preroll import road_filter_for
+
+        poly, box_filter = road_filter_for("0.1,0.1;0.9,0.1;0.9,0.9;0.1,0.9", 1000, 1000)
+        assert poly is not None
+        assert box_filter is not None
+        assert box_filter((450, 450, 550, 550), 2) is True
+        assert box_filter((0, 0, 10, 10), 2) is False
+
+    def test_save_sharpest_frame_writes_best(self, tmp_path):
+        from common.preroll import CaptureSettings, save_sharpest_frame
+
+        now = time.time()
+        target = now - 0.3
+        rng = np.random.default_rng(3)
+        flat = np.full((32, 32, 3), 50, dtype=np.uint8)
+        noisy = rng.integers(0, 256, size=(32, 32, 3)).astype(np.uint8)
+        grab = _FakeMain(frames=[(target, flat), (target + 0.05, noisy)])
+        settings = CaptureSettings(save_dir=str(tmp_path), pre_roll_ms=300, sharp_window_ms=200)
+        assert save_sharpest_frame(grab, now, settings) is True
+        assert list(tmp_path.glob("*.jpg"))
+
+    def test_save_sharpest_frame_empty_without_fallback(self, tmp_path):
+        from common.preroll import CaptureSettings, save_sharpest_frame
+
+        settings = CaptureSettings(save_dir=str(tmp_path))
+        assert save_sharpest_frame(_FakeMain(), time.time(), settings) is False
+
+    def test_save_sharpest_frame_fallback_isapi(self, tmp_path, monkeypatch):
+        import common.preroll as preroll_mod
+        from common.preroll import CaptureSettings, save_sharpest_frame
+
+        called: list = []
+        monkeypatch.setattr(preroll_mod, "save_isapi_snapshot", lambda *a, **k: called.append(k))
+        settings = CaptureSettings(save_dir=str(tmp_path), fallback_isapi=True)
+        assert save_sharpest_frame(_FakeMain(), time.time(), settings, _FakeCamera()) is False
+        assert len(called) == 1
+
+    def test_save_closest_frame_from_main(self, tmp_path):
+        from common.preroll import save_closest_frame
+
+        frame = np.full((32, 32, 3), 10, dtype=np.uint8)
+        grab = _FakeMain(closest=frame)
+        assert save_closest_frame(grab, _FakeSub(), 0.0, save_dir=str(tmp_path)) is True
+        assert list(tmp_path.glob("*.jpg"))
+
+    def test_save_closest_frame_falls_back_to_sub(self, tmp_path):
+        from common.preroll import save_closest_frame
+
+        frame = np.full((32, 32, 3), 10, dtype=np.uint8)
+        ok = save_closest_frame(_FakeMain(), _FakeSub(frame=frame), 0.0, fallback_dir=str(tmp_path))
+        assert ok is False
+        assert list(tmp_path.glob("*.jpg"))
+
+    def test_scheduler_cooldown_and_submit(self):
+        from common.preroll import CaptureScheduler
+
+        scheduler = CaptureScheduler(cooldown=60.0)
+        try:
+            assert scheduler.is_due() is True
+            assert scheduler.is_due() is False
+            future = scheduler.submit(lambda x: x + 1, 41)
+            assert future.result() == 42
+            assert scheduler.maybe_submit(lambda: None) is False
+        finally:
+            scheduler.shutdown()
+
+    def test_scheduler_maybe_submit_runs_task(self):
+        import threading as _threading
+
+        from common.preroll import CaptureScheduler
+
+        event = _threading.Event()
+        scheduler = CaptureScheduler(cooldown=0.0)
+        try:
+            assert scheduler.maybe_submit(event.set) is True
+            assert event.wait(timeout=1.0) is True
+        finally:
+            scheduler.shutdown()
