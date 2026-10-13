@@ -14,6 +14,9 @@ ANTES" del trigger (buffer circular). Opciones avanzadas heredadas:
 Uso:
   python3 capture_preroll.py --host 192.168.1.64 --user admin --password 'TuClave' \
       --rtsp-channel 102 --snapshot-channel 101 --model yolov8n.pt --pre-roll-ms 300
+
+El núcleo común (ajustes, filtro de carretera, scheduler y guardado del frame
+más nítido) vive en :mod:`common.preroll`.
 """
 
 import argparse
@@ -21,92 +24,28 @@ import logging
 import os
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 
 import cv2
 import numpy as np
 from ultralytics import YOLO
 
 from common import cli
-from common.config import CAPTURES_PREROLL_DIR, ISAPI_SNAPS_DIR
-from common.detector import BoxFilter, VehicleDetector
-from common.frames import FrameGrabberBuffer, FrameGrabberLatest, best_frame
-from common.geometry import draw_polygon, parse_polygon, point_inside_polygon
-from common.isapi import save_isapi_snapshot
+from common.detector import VehicleDetector
+from common.frames import FrameGrabberBuffer, FrameGrabberLatest
+from common.geometry import draw_polygon
+from common.preroll import (
+    CaptureScheduler,
+    CaptureSettings,
+    road_filter_for,
+    save_sharpest_frame,
+)
 from common.rtsp import build_isapi_url
-from common.utils import StableTrigger, save_jpeg, set_ffmpeg_low_latency_env, setup_logging
+from common.utils import StableTrigger, set_ffmpeg_low_latency_env, setup_logging
 
 logger = logging.getLogger(__name__)
 WINDOW = "Live (YOLOv8 LPR pre-roll)"
 
-# Pool acotado para las capturas asíncronas (en vez de un thread por captura).
-_capture_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="preroll")
-
-
-@dataclass(frozen=True)
-class CaptureSettings:
-    """Ajustes de captura de pre-roll (independientes del CLI)."""
-
-    save_dir: str = CAPTURES_PREROLL_DIR
-    pre_roll_ms: int = 300
-    sharp_window_ms: int = 200
-    sharp_min_frames: int = 1
-    sharp_max_frames: int = 9
-    fallback_isapi: bool = False
-
-
-def road_filter_for(
-    poly_str: str, width: int, height: int
-) -> tuple[np.ndarray | None, BoxFilter | None]:
-    """Convierte ``--road-poly`` en (polígono dibujable, box_filter).
-
-    El ``box_filter`` descarta vehículos cuyo centro está fuera del polígono.
-    Devuelve ``(None, None)`` si no hay polígono válido.
-    """
-    poly = parse_polygon(poly_str, width, height)
-    if poly is None:
-        return None, None
-
-    def _inside_road(box: tuple[int, int, int, int], cls_id: int) -> bool:
-        x1, y1, x2, y2 = box
-        return point_inside_polygon(((x1 + x2) // 2, (y1 + y2) // 2), poly)
-
-    return poly, _inside_road
-
-
-def async_capture(
-    grab_main: FrameGrabberBuffer,
-    now: float,
-    settings: CaptureSettings,
-    camera,
-    detection,
-) -> None:
-    """Guarda el frame más nítido del buffer, con fallback ISAPI."""
-    target_ts = now - (settings.pre_roll_ms / 1000.0)
-    frames = grab_main.get_frames_in_window(target_ts, settings.sharp_window_ms)
-    best = best_frame(
-        frames,
-        target_ts,
-        settings.sharp_window_ms,
-        min_frames=settings.sharp_min_frames,
-        max_frames=settings.sharp_max_frames,
-    )
-    if best is not None:
-        save_jpeg(best, folder=settings.save_dir, prefix="preroll_best")
-        return
-    if settings.fallback_isapi:
-        logger.warning("Buffer MAIN sin frames suficientes. Fallback ISAPI...")
-        save_isapi_snapshot(
-            camera.host,
-            camera.user,
-            camera.password,
-            folder=ISAPI_SNAPS_DIR,
-            channel=camera.snapshot_channel,
-            timeout=4,
-        )
-    else:
-        logger.warning("Buffer MAIN sin frames suficientes.")
+__all__ = ["CaptureSettings", "road_filter_for", "main"]
 
 
 def main() -> int:
@@ -184,7 +123,7 @@ def main() -> int:
 
     road_poly = None
     stable = StableTrigger(stable_frames=args.stable_frames, rearm_frames=args.rearm_frames)
-    last_capture_ts = 0.0
+    scheduler = CaptureScheduler(detection.capture_cooldown, thread_name_prefix="preroll")
     settings = CaptureSettings(
         save_dir=args.save_dir,
         pre_roll_ms=args.pre_roll_ms,
@@ -237,12 +176,9 @@ def main() -> int:
 
             # Estabiliza sobre 'vehículo COMPLETO dentro del ROI' (no solo 'detección')
             if stable.update(inside_roi):
-                now = time.time()
-                if (now - last_capture_ts) > detection.capture_cooldown:
-                    last_capture_ts = now
-                    _capture_executor.submit(
-                        async_capture, grab_main, now, settings, camera, detection
-                    )
+                scheduler.maybe_submit(
+                    save_sharpest_frame, grab_main, time.time(), settings, camera
+                )
 
             msg = "VEHICULO DETECTADO" if detected else "SIN DETECCION"
             color = (0, 200, 0) if detected else (0, 0, 255)
@@ -258,7 +194,7 @@ def main() -> int:
         grab_sub.release()
         grab_main.release()
         cv2.destroyAllWindows()
-        _capture_executor.shutdown(wait=False, cancel_futures=True)
+        scheduler.shutdown()
         logger.info("Transmisión finalizada correctamente.")
     return 0
 

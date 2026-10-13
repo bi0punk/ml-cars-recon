@@ -9,6 +9,9 @@ panel de estadísticas en pantalla (FPS, detecciones, capturas, buffer).
 Uso:
   python3 capture_preroll_lanes.py --host 192.168.1.64 --user admin --password 'TuClave' \
       --rtsp-channel 102 --snapshot-channel 101 --model yolov8n.pt
+
+El disparo asíncrono y el guardado del frame (con fallback al sub-stream) usan
+el núcleo común de :mod:`common.preroll`.
 """
 
 import argparse
@@ -16,20 +19,19 @@ import logging
 import os
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
 
 import cv2
 import numpy as np
 from ultralytics import YOLO
 
 from common import cli
-from common.config import CAPTURES_FALLBACK_DIR, CAPTURES_PREROLL_DIR
 from common.detector import VehicleDetector
 from common.frames import FrameGrabberBuffer, FrameGrabberLatest
 from common.geometry import compute_roi
 from common.lanes import LaneDetector
+from common.preroll import CaptureScheduler, save_closest_frame
 from common.rtsp import build_isapi_url
-from common.utils import save_jpeg, set_ffmpeg_low_latency_env, setup_logging
+from common.utils import set_ffmpeg_low_latency_env, setup_logging
 
 logger = logging.getLogger(__name__)
 
@@ -77,9 +79,16 @@ class PreRollLanesSystem:
             "captures": 0,
             "start_time": time.time(),
         }
-        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="lanes")
-        self._last_capture_ts = 0.0
+        self._scheduler = CaptureScheduler(detection.capture_cooldown, thread_name_prefix="lanes")
         logger.info("Sistema inicializado correctamente")
+
+    @property
+    def _last_capture_ts(self) -> float:
+        return self._scheduler.last_ts
+
+    @_last_capture_ts.setter
+    def _last_capture_ts(self, value: float) -> None:
+        self._scheduler.last_ts = value
 
     def _roi(self, w: int, h: int) -> tuple[int, int, int, int]:
         return compute_roi(
@@ -93,25 +102,13 @@ class PreRollLanesSystem:
     def _capture_preroll(self) -> None:
         """Captura con pre-roll desde el main-stream (fallback a sub-stream)."""
         target_ts = time.time() - (self.detection.pre_roll_ms / 1000.0)
-        frame = self.grab_main.get_closest_frame(target_ts)
-        if frame is not None:
-            save_jpeg(frame, folder=CAPTURES_PREROLL_DIR, prefix="main")
+        if save_closest_frame(self.grab_main, self.grab_sub, target_ts):
             self.stats["captures"] += 1
-        else:
-            logger.warning("Buffer MAIN vacío; usando sub-stream como fallback")
-            ok, fallback = self.grab_sub.read()
-            if ok and fallback is not None:
-                save_jpeg(fallback, folder=CAPTURES_FALLBACK_DIR, prefix="sub")
 
     def _maybe_capture(self, trigger_capture: bool) -> bool:
         """Dispara la captura pre-roll SOLO si un vehículo está completo dentro
         del ROI y respeta el cooldown. Retorna ``True`` si se disparó."""
-        now = time.time()
-        if trigger_capture and (now - self._last_capture_ts) > self.detection.capture_cooldown:
-            self._last_capture_ts = now
-            self._executor.submit(self._capture_preroll)
-            return True
-        return False
+        return bool(trigger_capture and self._scheduler.maybe_submit(self._capture_preroll))
 
     def _draw_info_panel(self, frame, detected: bool, fps: float, buffer_info: dict) -> None:
         height, width = frame.shape[:2]
@@ -207,7 +204,7 @@ class PreRollLanesSystem:
         logger.info("Liberando recursos...")
         self.grab_sub.release()
         self.grab_main.release()
-        self._executor.shutdown(wait=False, cancel_futures=True)
+        self._scheduler.shutdown()
         cv2.destroyAllWindows()
 
         runtime = max(time.time() - self.stats["start_time"], 0.001)
