@@ -109,6 +109,7 @@ class VehicleDetector:
                     cls_id = int(box.cls[0])
                     conf = float(box.conf[0])
                 except Exception:
+                    logger.debug("Caja YOLO malformada, ignorada")
                     continue
 
                 xA, yA, xB, yB = np.asarray(box.xyxy[0]).astype(int).tolist()

@@ -164,6 +164,6 @@ class DetectorCamera:
         try:
             if self._thread.is_alive():
                 self._thread.join(timeout=1.0)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Error esperando al hilo de la cámara: %s", exc)
         self.grabber.release()

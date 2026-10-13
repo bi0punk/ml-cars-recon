@@ -179,12 +179,12 @@ class TestIsapi:
             status_code = 200
             headers = {"Content-Type": "image/jpeg"}
 
-            def iter_content(self, chunk_size):
+            def iter_content(self, _chunk_size):
                 yield b"abc"
                 yield b"def"
 
         responses = deque([_Resp()])
-        monkeypatch.setattr(isapi_mod._session, "get", lambda *a, **k: responses.popleft())
+        monkeypatch.setattr(isapi_mod._session, "get", lambda *_a, **_k: responses.popleft())
 
         path = isapi_mod.save_isapi_snapshot(
             "192.168.1.64", "admin", "pass", folder=str(tmp_path), channel="101"
@@ -199,10 +199,10 @@ class TestIsapi:
             status_code = 200
             headers = {"Content-Type": "text/html"}
 
-            def iter_content(self, chunk_size):
+            def iter_content(self, _chunk_size):
                 yield b""
 
-        monkeypatch.setattr(isapi_mod._session, "get", lambda *a, **k: _Resp())
+        monkeypatch.setattr(isapi_mod._session, "get", lambda *_a, **_k: _Resp())
         assert (
             isapi_mod.save_isapi_snapshot("192.168.1.64", "admin", "pass", folder=str(tmp_path))
             is None
@@ -240,7 +240,7 @@ class TestIsapi:
             status_code = 500
             headers = {"Content-Type": "text/plain"}
 
-        monkeypatch.setattr(isapi_mod._session, "get", lambda *a, **k: _Resp())
+        monkeypatch.setattr(isapi_mod._session, "get", lambda *_a, **_k: _Resp())
         assert (
             isapi_mod.save_isapi_snapshot("192.168.1.64", "admin", "pass", folder=str(tmp_path))
             is None
@@ -255,7 +255,7 @@ class TestIsapi:
             status_code = 200
             headers = {"Content-Type": "image/jpeg"}
 
-            def iter_content(self, chunk_size):
+            def iter_content(self, _chunk_size):
                 yield b"x"
 
         def _get(url, **kwargs):
@@ -289,10 +289,10 @@ class _FakeCap:
             return True, self._frames.pop(0)
         return True, np.zeros((32, 32, 3), dtype=np.uint8)
 
-    def set(self, prop, value):
+    def set(self, _prop, value):
         return True
 
-    def get(self, prop):
+    def get(self, _prop):
         return 0
 
     def release(self):
@@ -313,10 +313,10 @@ class _FramesThenFailCap:
             return True, self._frames.pop(0)
         return False, None
 
-    def set(self, prop, value):
+    def set(self, _prop, value):
         return True
 
-    def get(self, prop):
+    def get(self, _prop):
         return 0
 
     def release(self):
@@ -360,7 +360,7 @@ class TestFrames:
     def test_latest_grabber_reads_last_frame(self):
         frames = [self.make_frame(v) for v in (10, 20, 30)]
         grabber = FrameGrabberLatest(
-            "rtsp://fakep", name="test-sub", cap_factory=lambda *a, **k: _FakeCap(frames)
+            "rtsp://fakep", name="test-sub", cap_factory=lambda *_a, **_k: _FakeCap(frames)
         )
         try:
             ok, frame = grabber.read()
@@ -372,7 +372,7 @@ class TestFrames:
 
     def test_buffer_window_returns_tuples(self):
         grabber = FrameGrabberBuffer(
-            "rtsp://fakep", name="test-main", cap_factory=lambda *a, **k: _FakeCap([])
+            "rtsp://fakep", name="test-main", cap_factory=lambda *_a, **_k: _FakeCap([])
         )
         try:
             time.sleep(0.15)
@@ -390,7 +390,7 @@ class TestFrames:
 
     def test_buffer_closest_frame(self):
         grabber = FrameGrabberBuffer(
-            "rtsp://fakep", name="test-main", cap_factory=lambda *a, **k: _FakeCap([])
+            "rtsp://fakep", name="test-main", cap_factory=lambda *_a, **_k: _FakeCap([])
         )
         try:
             time.sleep(0.15)
@@ -504,6 +504,7 @@ class _FakeYolo:
         self.calls = 0
 
     def predict(self, source, conf=0.45, classes=None, verbose=False, **kwargs):
+        _ = (source, classes)  # nombres exigidos por la firma real de YOLO
         self.calls += 1
         return [_FakeResult(self._boxes)]
 
@@ -539,7 +540,7 @@ class TestVehicleDetector:
     def test_trigger_if_ready_respects_cooldown(self, monkeypatch):
         import common.detector as detector_mod
 
-        monkeypatch.setattr(detector_mod, "save_isapi_snapshot", lambda *a, **k: None)
+        monkeypatch.setattr(detector_mod, "save_isapi_snapshot", lambda *_a, **_k: None)
         det = VehicleDetector(_FakeYolo([]), snapshot_cooldown=60.0)
         assert det.trigger_if_ready("h", "u", "p", "101") is True
         assert det.trigger_if_ready("h", "u", "p", "101") is False
@@ -547,7 +548,7 @@ class TestVehicleDetector:
     def test_trigger_if_ready_respects_zero_cooldown(self, monkeypatch):
         import common.detector as detector_mod
 
-        monkeypatch.setattr(detector_mod, "save_isapi_snapshot", lambda *a, **k: None)
+        monkeypatch.setattr(detector_mod, "save_isapi_snapshot", lambda *_a, **_k: None)
         det = VehicleDetector(_FakeYolo([]), snapshot_cooldown=0.0)
         assert det.trigger_if_ready("h", "u", "p", "101") is True
         assert det.trigger_if_ready("h", "u", "p", "101") is True
@@ -592,7 +593,7 @@ class TestVehicleDetectorAdvanced:
 
     def test_box_filter_can_discard_detections(self):
         box = _FakeBox(20, 20, 80, 80, 2, 0.9)
-        det = VehicleDetector(_FakeYolo([box]), box_filter=lambda b, c: False)
+        det = VehicleDetector(_FakeYolo([box]), box_filter=lambda _b, _c: False)
         _, detected, trigger = det.detect(self.make_frame(), (0, 0, 100, 100))
         assert detected is False
         assert trigger is False
@@ -729,7 +730,7 @@ class TestPreRollCore:
         from common.preroll import CaptureSettings, save_sharpest_frame
 
         called: list = []
-        monkeypatch.setattr(preroll_mod, "save_isapi_snapshot", lambda *a, **k: called.append(k))
+        monkeypatch.setattr(preroll_mod, "save_isapi_snapshot", lambda *_a, **_k: called.append(_k))
         settings = CaptureSettings(save_dir=str(tmp_path), fallback_isapi=True)
         assert save_sharpest_frame(_FakeMain(), time.time(), settings, _FakeCamera()) is False
         assert len(called) == 1
