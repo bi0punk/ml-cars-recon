@@ -212,13 +212,65 @@ class TestIsapi:
     def test_save_isapi_snapshot_timeout(self, monkeypatch, tmp_path):
         import common.isapi as isapi_mod
 
-        def _boom(**kwargs):
+        def _boom(*args, **kwargs):
             raise isapi_mod.requests.exceptions.Timeout()
 
         monkeypatch.setattr(isapi_mod._session, "get", _boom)
         assert (
             isapi_mod.save_isapi_snapshot("192.168.1.64", "admin", "pass", folder=str(tmp_path))
             is None
+        )
+
+    def test_save_isapi_snapshot_generic_error(self, monkeypatch, tmp_path):
+        import common.isapi as isapi_mod
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(isapi_mod._session, "get", _boom)
+        assert (
+            isapi_mod.save_isapi_snapshot("192.168.1.64", "admin", "pass", folder=str(tmp_path))
+            is None
+        )
+
+    def test_save_isapi_snapshot_http_error(self, monkeypatch, tmp_path):
+        import common.isapi as isapi_mod
+
+        class _Resp:
+            status_code = 500
+            headers = {"Content-Type": "text/plain"}
+
+        monkeypatch.setattr(isapi_mod._session, "get", lambda *a, **k: _Resp())
+        assert (
+            isapi_mod.save_isapi_snapshot("192.168.1.64", "admin", "pass", folder=str(tmp_path))
+            is None
+        )
+
+    def test_save_isapi_snapshot_forwards_timeout(self, monkeypatch, tmp_path):
+        import common.isapi as isapi_mod
+
+        captured: dict = {}
+
+        class _Resp:
+            status_code = 200
+            headers = {"Content-Type": "image/jpeg"}
+
+            def iter_content(self, chunk_size):
+                yield b"x"
+
+        def _get(url, **kwargs):
+            captured.update(kwargs)
+            return _Resp()
+
+        monkeypatch.setattr(isapi_mod._session, "get", _get)
+        isapi_mod.save_isapi_snapshot(
+            "192.168.1.64", "admin", "pass", folder=str(tmp_path), timeout=7
+        )
+        assert captured["timeout"] == 7
+
+    def test_snapshot_url_custom_channel(self):
+        assert snapshot_url("10.0.0.1", "202") == (
+            "http://10.0.0.1/ISAPI/Streaming/channels/202/picture"
         )
 
 
