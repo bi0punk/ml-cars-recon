@@ -91,6 +91,35 @@ class _BaseFrameGrabber:
             logger.error("[%s] Falló conexión RTSP", self.name)
         return is_opened
 
+    def _handle_invalid_read(self, stale_reads: int, backoff: float) -> tuple[int, float]:
+        """Contabiliza una lectura inválida; reconecta si se supera el umbral.
+
+        Retorna ``(stale_reads, backoff)`` actualizados.
+        """
+        self.ok = False
+        stale_reads += 1
+        if stale_reads >= self.stale_frame_threshold:
+            logger.warning(
+                "[%s] Stream sin frames (%d intentos seguidos). Reconectando...",
+                self.name,
+                stale_reads,
+            )
+            self._open_stream()
+            return 0, min(backoff * 2, self.max_reconnect_delay)
+        logger.debug("[%s] Frame inválido (%d), reintentando...", self.name, stale_reads)
+        time.sleep(self._invalid_sleep)
+        return stale_reads, backoff
+
+    def _resize(self, frame: np.ndarray) -> np.ndarray | None:
+        """Redimensiona al tamaño configurado, o ``None`` si falla."""
+        if not (self.width and self.height):
+            return frame
+        try:
+            return cv2.resize(frame, (self.width, self.height), interpolation=cv2.INTER_AREA)
+        except Exception:
+            logger.error("[%s] Error redimensionando frame", self.name)
+            return None
+
     def _capture_loop(self) -> None:
         backoff = self.reconnect_delay
         first_frame_received = False
@@ -110,22 +139,7 @@ class _BaseFrameGrabber:
 
             ret, frame = cap.read()
             if not ret or frame is None or (self._size_zero_is_invalid and frame.size == 0):
-                self.ok = False
-                stale_reads += 1
-                if stale_reads >= self.stale_frame_threshold:
-                    logger.warning(
-                        "[%s] Stream sin frames (%d intentos seguidos). Reconectando...",
-                        self.name,
-                        stale_reads,
-                    )
-                    self._open_stream()
-                    stale_reads = 0
-                    backoff = min(backoff * 2, self.max_reconnect_delay)
-                else:
-                    logger.debug(
-                        "[%s] Frame inválido (%d), reintentando...", self.name, stale_reads
-                    )
-                    time.sleep(self._invalid_sleep)
+                stale_reads, backoff = self._handle_invalid_read(stale_reads, backoff)
                 continue
 
             stale_reads = 0
@@ -136,17 +150,12 @@ class _BaseFrameGrabber:
 
             timestamp = time.time()
 
-            if self.width and self.height:
-                try:
-                    frame = cv2.resize(
-                        frame, (self.width, self.height), interpolation=cv2.INTER_AREA
-                    )
-                except Exception:
-                    logger.error("[%s] Error redimensionando frame", self.name)
-                    continue
+            resized = self._resize(frame)
+            if resized is None:
+                continue
 
             with self.lock:
-                self._store_frame(timestamp, frame.copy())
+                self._store_frame(timestamp, resized.copy())
                 self.ok = True
 
             if not first_frame_received:
