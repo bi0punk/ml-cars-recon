@@ -16,9 +16,10 @@ import numpy as np
 
 from common.config import CAPTURES_FALLBACK_DIR, CAPTURES_PREROLL_DIR, ISAPI_SNAPS_DIR
 from common.detector import BoxFilter
-from common.frames import FrameGrabberBuffer, FrameGrabberLatest, best_frame
+from common.frames import FrameGrabberBuffer, FrameGrabberLatest
 from common.geometry import parse_polygon, point_inside_polygon
 from common.isapi import save_isapi_snapshot
+from common.sharpness import best_frame
 from common.utils import save_jpeg
 
 logger = logging.getLogger(__name__)
