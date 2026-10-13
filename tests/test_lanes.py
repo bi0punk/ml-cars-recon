@@ -50,3 +50,64 @@ class TestLaneDetector:
         right = np.array([310, 240, 200, 100])
         out = det.draw_lanes(frame, left, right)
         assert out.shape == frame.shape
+
+
+class TestLaneDetectorInternals:
+    def test_slope_intercept_normal(self):
+        det = LaneDetector()
+        slope, intercept = det._calculate_slope_intercept(np.array([0, 0, 10, 10]))
+        assert slope == pytest.approx(1.0)
+        assert intercept == pytest.approx(0.0)
+
+    def test_slope_intercept_vertical_is_infinite(self):
+        det = LaneDetector()
+        slope, intercept = det._calculate_slope_intercept(np.array([5, 0, 5, 50]))
+        assert slope == float("inf")
+        assert intercept == 0
+
+    def test_separate_lines_none_returns_empty(self):
+        det = LaneDetector()
+        assert det._separate_lines(None) == ([], [])
+
+    def test_separate_lines_splits_by_slope(self):
+        det = LaneDetector()
+        lines = np.array(
+            [
+                [[10, 100, 50, 0]],  # pendiente negativa -> izquierda
+                [[50, 0, 90, 100]],  # pendiente positiva -> derecha
+                [[0, 50, 100, 55]],  # casi horizontal -> descartada
+                [[0, 0, 100, 1000]],  # pendiente fuera de rango -> descartada
+            ]
+        )
+        left, right = det._separate_lines(lines)
+        assert len(left) == 1
+        assert len(right) == 1
+
+    def test_average_lines_empty_returns_none(self):
+        assert LaneDetector()._average_lines([], 240, 100) is None
+
+    def test_average_lines_averages(self):
+        avg = LaneDetector()._average_lines([(-2.0, 200.0), (-2.0, 220.0)], 240, 144)
+        assert avg is not None
+        assert avg.shape == (4,)
+
+    def test_detect_returns_lanes_on_synthetic_roads(self):
+        roi = np.array([[(0, 239), (0, 0), (319, 0), (319, 239)]], dtype=np.int32)
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        cv2.line(frame, (30, 220), (110, 60), (255, 255, 255), 5)
+        cv2.line(frame, (290, 220), (210, 60), (255, 255, 255), 5)
+        left, right = LaneDetector(roi_vertices=roi).detect(frame)
+        assert left is not None
+        assert right is not None
+
+    def test_draw_lanes_left_only(self):
+        det = LaneDetector()
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        out = det.draw_lanes(frame, np.array([10, 240, 120, 100]), None)
+        assert out.shape == frame.shape
+
+    def test_draw_lanes_right_only(self):
+        det = LaneDetector()
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        out = det.draw_lanes(frame, None, np.array([310, 240, 200, 100]))
+        assert out.shape == frame.shape
